@@ -21,6 +21,12 @@ pub mod virtio;
 
 pub use self::bus::{Bus, BusDevice, Error as BusError};
 
+#[cfg(all(feature = "blk", unix))]
+pub use imago::{
+    custom_io::{io_ops, Operations},
+    CustomIOOptions,
+};
+
 #[derive(Debug)]
 pub enum Error {
     FailedReadingQueue {

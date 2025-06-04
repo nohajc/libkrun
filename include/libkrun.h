@@ -125,6 +125,18 @@ int32_t krun_set_data_disk(uint32_t ctx_id, const char *disk_path);
  */
 int32_t krun_add_disk(uint32_t ctx_id, const char *block_id, const char *disk_path, bool read_only);
 
+typedef ssize_t (*krun_preadv_fn_t)(int hnd, const struct iovec *iov, int iovcnt, off_t offset);
+typedef ssize_t (*krun_pwritev_fn_t)(int hnd, const struct iovec *iov, int iovcnt, off_t offset);
+typedef ssize_t (*krun_size_fn_t)(int hnd);
+
+int32_t krun_add_disk_with_custom_io(uint32_t ctx_id,
+                                     const char *block_id,
+                                     int handle,
+                                     krun_preadv_fn_t preadv_fn,
+                                     krun_pwritev_fn_t pwritev_fn,
+                                     krun_size_fn_t size_fn,
+                                     bool read_only);
+
 /* Supported disk image formats */
 #define KRUN_DISK_FORMAT_RAW 0
 #define KRUN_DISK_FORMAT_QCOW2 1

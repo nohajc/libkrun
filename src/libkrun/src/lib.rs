@@ -21,6 +21,8 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 
 use crossbeam_channel::unbounded;
+#[cfg(all(feature = "blk", unix))]
+use devices::io_ops;
 #[cfg(feature = "blk")]
 use devices::virtio::block::ImageType;
 #[cfg(feature = "net")]
@@ -36,7 +38,7 @@ use polly::event_manager::EventManager;
 use utils::eventfd::EventFd;
 use vmm::resources::VmResources;
 #[cfg(feature = "blk")]
-use vmm::vmm_config::block::BlockDeviceConfig;
+use vmm::vmm_config::block::{BlockDeviceConfig, DeviceKind};
 use vmm::vmm_config::boot_source::{BootSourceConfig, DEFAULT_KERNEL_CMDLINE};
 #[cfg(not(feature = "tee"))]
 use vmm::vmm_config::external_kernel::{ExternalKernel, KernelFormat};
@@ -507,8 +509,54 @@ pub unsafe extern "C" fn krun_add_disk(
             let block_device_config = BlockDeviceConfig {
                 block_id: block_id.to_string(),
                 cache_type: CacheType::auto(disk_path),
-                disk_image_path: disk_path.to_string(),
-                disk_image_format: ImageType::Raw,
+                device: DeviceKind::File {
+                    disk_image_path: disk_path.to_string(),
+                    disk_image_format: ImageType::Raw,
+                },
+                is_disk_read_only: read_only,
+            };
+            cfg.add_block_cfg(block_device_config);
+        }
+        Entry::Vacant(_) => return -libc::ENOENT,
+    }
+
+    KRUN_SUCCESS
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+#[cfg(all(feature = "blk", unix))]
+pub unsafe extern "C" fn krun_add_disk_with_custom_io(
+    ctx_id: u32,
+    c_block_id: *const c_char,
+    handle: c_int,
+    preadv_fn: io_ops::PreadvFn,
+    pwritev_fn: io_ops::PwritevFn,
+    size_fn: io_ops::SizeFn,
+    read_only: bool,
+) -> i32 {
+    use devices::{CustomIOOptions, Operations};
+
+    let block_id = match CStr::from_ptr(c_block_id).to_str() {
+        Ok(block_id) => block_id,
+        Err(_) => return -libc::EINVAL,
+    };
+
+    match CTX_MAP.lock().unwrap().entry(ctx_id) {
+        Entry::Occupied(mut ctx_cfg) => {
+            let cfg = ctx_cfg.get_mut();
+            let block_device_config = BlockDeviceConfig {
+                block_id: block_id.to_string(),
+                cache_type: CacheType::Unsafe,
+                device: DeviceKind::CustomIO(CustomIOOptions {
+                    handle,
+                    io_ops: Operations {
+                        preadv_fn,
+                        pwritev_fn,
+                        size_fn,
+                    },
+                    display_name: block_id.to_string(),
+                }),
                 is_disk_read_only: read_only,
             };
             cfg.add_block_cfg(block_device_config);
@@ -554,8 +602,10 @@ pub unsafe extern "C" fn krun_add_disk2(
             let block_device_config = BlockDeviceConfig {
                 block_id: block_id.to_string(),
                 cache_type: CacheType::auto(disk_path),
-                disk_image_path: disk_path.to_string(),
-                disk_image_format: format,
+                device: DeviceKind::File {
+                    disk_image_path: disk_path.to_string(),
+                    disk_image_format: format,
+                },
                 is_disk_read_only: read_only,
             };
             cfg.add_block_cfg(block_device_config);
@@ -581,8 +631,10 @@ pub unsafe extern "C" fn krun_set_root_disk(ctx_id: u32, c_disk_path: *const c_c
             let block_device_config = BlockDeviceConfig {
                 block_id: "root".to_string(),
                 cache_type: CacheType::auto(disk_path),
-                disk_image_path: disk_path.to_string(),
-                disk_image_format: ImageType::Raw,
+                device: DeviceKind::File {
+                    disk_image_path: disk_path.to_string(),
+                    disk_image_format: ImageType::Raw,
+                },
                 is_disk_read_only: false,
             };
             cfg.set_root_block_cfg(block_device_config);
@@ -608,8 +660,10 @@ pub unsafe extern "C" fn krun_set_data_disk(ctx_id: u32, c_disk_path: *const c_c
             let block_device_config = BlockDeviceConfig {
                 block_id: "data".to_string(),
                 cache_type: CacheType::auto(disk_path),
-                disk_image_path: disk_path.to_string(),
-                disk_image_format: ImageType::Raw,
+                device: DeviceKind::File {
+                    disk_image_path: disk_path.to_string(),
+                    disk_image_format: ImageType::Raw,
+                },
                 is_disk_read_only: false,
             };
             cfg.set_data_block_cfg(block_device_config);

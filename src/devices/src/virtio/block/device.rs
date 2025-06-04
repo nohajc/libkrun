@@ -19,10 +19,11 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use imago::file::File as ImagoFile;
 use imago::qcow2::Qcow2;
-use imago::SyncFormatAccess;
+use imago::{DynStorage, SyncFormatAccess};
 use log::{error, warn};
+use rand::rngs::OsRng;
+use rand::RngCore;
 use utils::eventfd::{EventFd, EFD_NONBLOCK};
 use virtio_bindings::{
     virtio_blk::*, virtio_config::VIRTIO_F_VERSION_1, virtio_ring::VIRTIO_RING_F_EVENT_IDX,
@@ -66,14 +67,14 @@ impl CacheType {
 /// Helper object for setting up all `Block` fields derived from its backing file.
 pub(crate) struct DiskProperties {
     cache_type: CacheType,
-    pub(crate) file: Arc<SyncFormatAccess<ImagoFile>>,
+    pub(crate) file: Arc<SyncFormatAccess<Box<dyn DynStorage>>>,
     nsectors: u64,
     image_id: Vec<u8>,
 }
 
 impl DiskProperties {
     pub fn new(
-        disk_image: Arc<SyncFormatAccess<ImagoFile>>,
+        disk_image: Arc<SyncFormatAccess<Box<dyn DynStorage>>>,
         disk_image_id: Vec<u8>,
         cache_type: CacheType,
     ) -> io::Result<Self> {
@@ -97,7 +98,7 @@ impl DiskProperties {
         })
     }
 
-    pub fn file(&self) -> &SyncFormatAccess<ImagoFile> {
+    pub fn file(&self) -> &SyncFormatAccess<Box<dyn DynStorage>> {
         self.file.as_ref()
     }
 
@@ -135,6 +136,13 @@ impl DiskProperties {
                 default_id[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
             }
         }
+        default_id
+    }
+
+    fn random_disk_id() -> Vec<u8> {
+        // Generate a random disk id.
+        let mut default_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
+        OsRng::default().fill_bytes(&mut default_id);
         default_id
     }
 
@@ -179,7 +187,7 @@ pub struct Block {
     // Host file and properties.
     disk: Option<DiskProperties>,
     cache_type: CacheType,
-    disk_image: Arc<SyncFormatAccess<ImagoFile>>,
+    disk_image: Arc<SyncFormatAccess<Box<dyn DynStorage>>>,
     disk_image_id: Vec<u8>,
     worker_thread: Option<JoinHandle<()>>,
     worker_stopfd: EventFd,
@@ -209,7 +217,7 @@ impl Block {
     /// Create a new virtio block device that operates on the given file.
     ///
     /// The given file must be seekable and sizable.
-    pub fn new(
+    pub fn from_file(
         id: String,
         partuuid: Option<String>,
         cache_type: CacheType,
@@ -226,8 +234,10 @@ impl Block {
 
         let disk_image = match disk_image_format {
             ImageType::Qcow2 => {
-                let mut qcow_disk_image =
-                    Qcow2::<ImagoFile>::open_path_sync(disk_image_path, !is_disk_read_only)?;
+                let mut qcow_disk_image = Qcow2::<Box<dyn DynStorage>>::open_path_sync(
+                    disk_image_path,
+                    !is_disk_read_only,
+                )?;
                 qcow_disk_image.open_implicit_dependencies_sync()?;
                 SyncFormatAccess::new(qcow_disk_image)?
             }
@@ -236,6 +246,53 @@ impl Block {
                 SyncFormatAccess::new(raw)?
             }
         };
+
+        Self::from_disk_image(
+            id,
+            partuuid,
+            cache_type,
+            disk_image,
+            disk_image_id,
+            is_disk_read_only,
+        )
+    }
+
+    #[cfg(unix)]
+    /// Create a new virtio block device that operates on the given file.
+    ///
+    /// The given file must be seekable and sizable.
+    pub fn from_custom_io(
+        id: String,
+        partuuid: Option<String>,
+        cache_type: CacheType,
+        io_opts: crate::CustomIOOptions,
+        is_disk_read_only: bool,
+    ) -> io::Result<Block> {
+        let disk_image = SyncFormatAccess::new(imago::raw::Raw::open_custom_io_sync(
+            io_opts,
+            !is_disk_read_only,
+        )?)?;
+
+        let disk_image_id = DiskProperties::random_disk_id();
+
+        Self::from_disk_image(
+            id,
+            partuuid,
+            cache_type,
+            disk_image,
+            disk_image_id,
+            is_disk_read_only,
+        )
+    }
+
+    fn from_disk_image(
+        id: String,
+        partuuid: Option<String>,
+        cache_type: CacheType,
+        disk_image: SyncFormatAccess<Box<dyn DynStorage>>,
+        disk_image_id: Vec<u8>,
+        is_disk_read_only: bool,
+    ) -> io::Result<Block> {
         let disk_image = Arc::new(disk_image);
 
         let disk_properties =

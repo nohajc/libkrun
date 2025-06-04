@@ -25,9 +25,18 @@ type Result<T> = std::result::Result<T, BlockConfigError>;
 pub struct BlockDeviceConfig {
     pub block_id: String,
     pub cache_type: CacheType,
-    pub disk_image_path: String,
-    pub disk_image_format: ImageType,
+    pub device: DeviceKind,
     pub is_disk_read_only: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeviceKind {
+    File {
+        disk_image_path: String,
+        disk_image_format: ImageType,
+    },
+    #[cfg(unix)]
+    CustomIO(devices::CustomIOOptions),
 }
 
 #[derive(Default)]
@@ -49,14 +58,27 @@ impl BlockBuilder {
     }
 
     pub fn create_block(config: BlockDeviceConfig) -> Result<Block> {
-        devices::virtio::Block::new(
-            config.block_id,
-            None,
-            config.cache_type,
-            config.disk_image_path,
-            config.disk_image_format,
-            config.is_disk_read_only,
-        )
+        match config.device {
+            DeviceKind::File {
+                disk_image_path,
+                disk_image_format,
+            } => devices::virtio::Block::from_file(
+                config.block_id,
+                None,
+                config.cache_type,
+                disk_image_path,
+                disk_image_format,
+                config.is_disk_read_only,
+            ),
+            #[cfg(unix)]
+            DeviceKind::CustomIO(opts) => devices::virtio::Block::from_custom_io(
+                config.block_id,
+                None,
+                config.cache_type,
+                opts,
+                config.is_disk_read_only,
+            ),
+        }
         .map_err(BlockConfigError::CreateBlockDevice)
     }
 }
