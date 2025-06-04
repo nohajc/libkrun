@@ -22,8 +22,6 @@ use std::thread::JoinHandle;
 use imago::qcow2::Qcow2;
 use imago::{DynStorage, SyncFormatAccess};
 use log::{error, warn};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use utils::eventfd::{EventFd, EFD_NONBLOCK};
 use virtio_bindings::{
     virtio_blk::*, virtio_config::VIRTIO_F_VERSION_1, virtio_ring::VIRTIO_RING_F_EVENT_IDX,
@@ -136,13 +134,6 @@ impl DiskProperties {
                 default_id[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
             }
         }
-        default_id
-    }
-
-    fn random_disk_id() -> Vec<u8> {
-        // Generate a random disk id.
-        let mut default_id = vec![0; VIRTIO_BLK_ID_BYTES as usize];
-        OsRng::default().fill_bytes(&mut default_id);
         default_id
     }
 
@@ -268,12 +259,16 @@ impl Block {
         io_opts: crate::CustomIOOptions,
         is_disk_read_only: bool,
     ) -> io::Result<Block> {
+        use sha2::{Digest, Sha224};
+
         let disk_image = SyncFormatAccess::new(imago::raw::Raw::open_custom_io_sync(
-            io_opts,
+            &io_opts,
             !is_disk_read_only,
         )?)?;
 
-        let disk_image_id = DiskProperties::random_disk_id();
+        let disk_image_id = Sha224::digest(io_opts.display_name.as_bytes()).to_vec()
+            [..VIRTIO_BLK_ID_BYTES as usize]
+            .to_vec();
 
         Self::from_disk_image(
             id,
