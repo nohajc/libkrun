@@ -356,7 +356,7 @@ impl Vmm {
         // Exit from Firecracker using the provided exit code. Safe because we're terminating
         // the process anyway.
         unsafe {
-            libc::_exit(exit_code);
+            libc::exit(exit_code);
         }
     }
 

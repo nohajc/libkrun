@@ -1439,8 +1439,8 @@ pub extern "C" fn krun_start_enter(ctx_id: u32) -> i32 {
 
     #[cfg(feature = "blk")]
     for block_cfg in ctx_cfg.get_block_cfg() {
-        if ctx_cfg.vmr.add_block_device(block_cfg).is_err() {
-            error!("Error configuring virtio-blk for block");
+        if let Err(e) = ctx_cfg.vmr.add_block_device(block_cfg) {
+            error!("Error configuring virtio-blk for block: {}", e);
             return -libc::EINVAL;
         }
     }
