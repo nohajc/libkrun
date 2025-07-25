@@ -38,5 +38,5 @@ vm-memory = ">=0.13"
 
 [lib]
 name = "krun"
-crate-type = ["staticlib"]
+crate-type = ["cdylib", "staticlib"]
 #crate-type = ["cdylib"]
