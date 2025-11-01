@@ -17,12 +17,20 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#if __FreeBSD__
+#include <sys/param.h>
+#include <sys/mount.h>
+#include <libutil.h>
+#else
 #include <sys/statfs.h>
+#endif
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#if __linux__
 #include <linux/vm_sockets.h>
+#endif
 
 #include "jsmn.h"
 
@@ -49,6 +57,50 @@ static char *snp_get_luks_passphrase(char *, char *, char *, int *);
 #endif
 
 char DEFAULT_KRUN_INIT[] = "/bin/sh";
+
+#if __FreeBSD__
+#define _PATH_CONSOLE "/dev/console"
+#define _PATH_DEVNULL "/dev/null"
+#define _PATH_INITLOG "/init.log"
+/*
+ * Start a session and allocate a controlling terminal.
+ * Only called by children of init after forking.
+ */
+static void
+open_console(void)
+{
+        int fd;
+
+        /*
+         * Try to open /dev/console.  Open the device with O_NONBLOCK to
+         * prevent potential blocking on a carrier.
+         */
+        revoke(_PATH_CONSOLE);
+        if ((fd = open(_PATH_CONSOLE, O_RDWR | O_NONBLOCK)) != -1) {
+                (void)fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+                if (login_tty(fd) == 0)
+                        return;
+                close(fd);
+        }
+
+        /* No luck.  Log output to file if possible. */
+        if ((fd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
+                _exit(1);
+        }
+        if (fd != STDIN_FILENO) {
+                dup2(fd, STDIN_FILENO);
+                close(fd);
+        }
+        fd = open(_PATH_INITLOG, O_WRONLY | O_APPEND | O_CREAT, 0644);
+        if (fd == -1)
+                dup2(STDIN_FILENO, STDOUT_FILENO);
+        else if (fd != STDOUT_FILENO) {
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+        }
+        dup2(STDOUT_FILENO, STDERR_FILENO);
+}
+#endif
 
 static void set_rlimits(const char *rlimits)
 {
@@ -395,6 +447,7 @@ static int chroot_luks()
 
 static int mount_filesystems()
 {
+#if __linux__
     char *const DIRS_LEVEL1[] = {"/dev", "/proc", "/sys"};
     char *const DIRS_LEVEL2[] = {"/dev/pts", "/dev/shm"};
     int i;
@@ -451,7 +504,41 @@ static int mount_filesystems()
 
     /* May fail if already exists and that's fine. */
     symlink("/proc/self/fd", "/dev/fd");
+#else
+    struct iovec iov[4];
+    char *s;
+    int i;
 
+    char _fstype[]  = "fstype";
+    char _devfs[]   = "devfs";
+    char _fspath[]  = "fspath";
+    char _path_dev[]= "/dev";
+
+    iov[0].iov_base = _fstype;
+    iov[0].iov_len = sizeof(_fstype);
+    iov[1].iov_base = _devfs;
+    iov[1].iov_len = sizeof(_devfs);
+    iov[2].iov_base = _fspath;
+    iov[2].iov_len = sizeof(_fspath);
+    /*
+     * Try to avoid the trailing slash in _PATH_DEV.
+     * Be *very* defensive.
+     */
+    s = strdup("/dev");
+    if (s != NULL) {
+        i = strlen(s);
+        if (i > 0 && s[i - 1] == '/')
+            s[i - 1] = '\0';
+        iov[3].iov_base = s;
+        iov[3].iov_len = strlen(s) + 1;
+    } else {
+        iov[3].iov_base = _path_dev;
+        iov[3].iov_len = sizeof(_path_dev);
+    }
+    nmount(iov, 4, 0);
+    if (s != NULL)
+        free(s);
+#endif
     return 0;
 }
 
@@ -1003,6 +1090,7 @@ void set_exit_code(int code)
     close(fd);
 }
 
+#if __linux__
 int try_mount(const char *source, const char *target, const char *fstype,
               unsigned long mountflags, const void *data)
 {
@@ -1037,6 +1125,7 @@ int try_mount(const char *source, const char *target, const char *fstype,
 
     return mount_status;
 }
+#endif
 
 int main(int argc, char **argv)
 {
@@ -1092,6 +1181,7 @@ int main(int argc, char **argv)
         exit(-2);
     }
 
+#if __linux__
     krun_root = getenv("KRUN_BLOCK_ROOT_DEVICE");
     if (krun_root) {
         if (mkdir("/newroot", 0755) < 0 && errno != EEXIST) {
@@ -1132,6 +1222,7 @@ int main(int argc, char **argv)
             exit(-2);
         }
     }
+#endif
 
     if (mount(NULL, "/", NULL, MS_REC | MS_SHARED, NULL) < 0) {
         perror("Couldn't set shared propagation on the root mount");
@@ -1140,6 +1231,10 @@ int main(int argc, char **argv)
 
     setsid();
     ioctl(0, TIOCSCTTY, 1);
+
+#if __FreeBSD__
+    setlogin("root");
+#endif
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd >= 0) {
@@ -1219,9 +1314,13 @@ int main(int argc, char **argv)
     }
     if (child == 0) { // child
     exec_init:
+#if __linux__
         if (setup_redirects() < 0) {
             exit(125);
         }
+#else
+	open_console();
+#endif
         if (execvp(exec_argv[0], exec_argv) < 0) {
             saved_errno = errno;
             printf("Couldn't execute '%s' inside the vm: %s\n", exec_argv[0],
