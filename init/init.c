@@ -504,7 +504,7 @@ static int mount_filesystems()
 
     /* May fail if already exists and that's fine. */
     symlink("/proc/self/fd", "/dev/fd");
-#else
+#elif 0
     struct iovec iov[4];
     char *s;
     int i;
