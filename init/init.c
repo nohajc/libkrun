@@ -21,6 +21,7 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <libutil.h>
+#include <kenv.h>
 #else
 #include <sys/statfs.h>
 #endif
@@ -59,6 +60,18 @@ static char *snp_get_luks_passphrase(char *, char *, char *, int *);
 char DEFAULT_KRUN_INIT[] = "/bin/sh";
 
 #if __FreeBSD__
+
+static char kenv_value[KENV_MVALLEN + 1];
+
+static char* get_kenv(const char* name) {
+	if (kenv(KENV_GET, name, kenv_value, KENV_MVALLEN + 1) < 0) {
+		return NULL;
+	}
+	return kenv_value;
+}
+
+#define getenv get_kenv
+
 #define _PATH_CONSOLE "/dev/console"
 #define _PATH_DEVNULL "/dev/null"
 #define _PATH_INITLOG "/init.log"
