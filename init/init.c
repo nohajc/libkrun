@@ -61,13 +61,30 @@ char DEFAULT_KRUN_INIT[] = "/bin/sh";
 
 #if __FreeBSD__
 
+#define b64_ntop __b64_ntop
+#define b64_pton __b64_pton
+/* There are no header files for these functions. */
+
+int b64_ntop(unsigned char const *src, size_t srclength,
+		             char *target, size_t targsize);
+int b64_pton(char const *src, unsigned char *target, size_t targsize);
+
 static char kenv_value[KENV_MVALLEN + 1];
 
+// TODO: may leak memory; fix later
 static char* get_kenv(const char* name) {
 	if (kenv(KENV_GET, name, kenv_value, KENV_MVALLEN + 1) < 0) {
 		return NULL;
 	}
-	return kenv_value;
+	return strdup(kenv_value);
+}
+
+static int get_krun_init_argv_flat(char* buf, int len) {
+	char* argv_b64 = get_kenv("KRUN_INIT_ARGV_B64");
+	if (argv_b64 == NULL) {
+		return 0;
+	}
+	return b64_pton(argv_b64, (unsigned char*)buf, len);
 }
 
 #define getenv get_kenv
@@ -1287,7 +1304,11 @@ int main(int argc, char **argv)
         chdir(config_workdir);
     }
 
+#if __linux__
     exec_argv = argv;
+#else
+    exec_argv = malloc(MAX_ARGS * sizeof(char *));
+#endif
     krun_init = getenv("KRUN_INIT");
     if (krun_init) {
         exec_argv[0] = krun_init;
@@ -1296,6 +1317,20 @@ int main(int argc, char **argv)
     } else {
         exec_argv[0] = &DEFAULT_KRUN_INIT[0];
     }
+
+#if __FreeBSD__
+    int i = 1;
+    static char argv_flat[KENV_MVALLEN + 1];
+    int argv_flat_len = get_krun_init_argv_flat(argv_flat, KENV_MVALLEN + 1);
+
+    int j = 0;
+    while (j < argv_flat_len) {
+        exec_argv[i++] = &argv_flat[j];
+        for (; j < argv_flat_len && argv_flat[j] != 0; j++) {}
+        j++;
+    }
+    exec_argv[i] = NULL;
+#endif
 
     env_init_pid1 = getenv("KRUN_INIT_PID1");
     if (env_init_pid1 && *env_init_pid1 == '1') {
