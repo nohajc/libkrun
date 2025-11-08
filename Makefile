@@ -109,7 +109,7 @@ endif
 INIT_BINARY_BSD = init/init-freebsd
 ifeq ($(OS),FreeBSD)
 $(INIT_BINARY_BSD): $(INIT_SRC)
-	clang -O2 -static -Wall $(INIT_DEFS) -lutil -o $@ $(INIT_SRC) $(INIT_DEFS)
+	clang -std=c23 -O2 -static -Wall $(INIT_DEFS) -lutil -o $@ $(INIT_SRC) $(INIT_DEFS)
 endif
 
 $(LIBRARY_RELEASE_$(OS)): $(INIT_BINARY)
