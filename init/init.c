@@ -1125,7 +1125,6 @@ int try_mount(const char *source, const char *target, const char *fstype,
 int main(int argc, char **argv)
 {
     struct ifreq ifr;
-    int fd;
     int sockfd;
     int status;
     int saved_errno;
@@ -1135,9 +1134,12 @@ int main(int argc, char **argv)
     char *krun_home;
     char *krun_term;
     char *krun_init;
+#if __linux__
+    int fd;
     char *krun_root;
     char *krun_root_fstype;
     char *krun_root_options;
+#endif
     char *env_init_pid1;
     char *config_workdir, *env_workdir;
     char *rlimits;
