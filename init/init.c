@@ -69,15 +69,13 @@ int b64_ntop(unsigned char const *src, size_t srclength, char *target,
              size_t targsize);
 int b64_pton(char const *src, unsigned char *target, size_t targsize);
 
-static char kenv_value[KENV_MVALLEN + 1];
-
-// TODO: may leak memory; fix later
 static char *get_kenv(const char *name)
 {
+    static char kenv_value[KENV_MVALLEN + 1];
     if (kenv(KENV_GET, name, kenv_value, KENV_MVALLEN + 1) < 0) {
         return NULL;
     }
-    return strdup(kenv_value);
+    return kenv_value;
 }
 
 static int get_krun_init_argv_flat(char *buf, int len)
@@ -1179,21 +1177,24 @@ int main(int argc, char **argv)
     }
 
 #if __linux__
-    krun_root = getenv("KRUN_BLOCK_ROOT_DEVICE");
+    krun_root = strdup(getenv("KRUN_BLOCK_ROOT_DEVICE"));
     if (krun_root) {
         if (mkdir("/newroot", 0755) < 0 && errno != EEXIST) {
             perror("mkdir(/newroot)");
             exit(-1);
         }
 
-        krun_root_fstype = getenv("KRUN_BLOCK_ROOT_FSTYPE");
-        krun_root_options = getenv("KRUN_BLOCK_ROOT_OPTIONS");
+        krun_root_fstype = strdup(getenv("KRUN_BLOCK_ROOT_FSTYPE"));
+        krun_root_options = strdup(getenv("KRUN_BLOCK_ROOT_OPTIONS"));
 
         if (try_mount(krun_root, "/newroot", krun_root_fstype, 0,
                       krun_root_options) < 0) {
             perror("mount KRUN_BLOCK_ROOT_DEVICE");
             exit(-1);
         }
+        free(krun_root);
+        free(krun_root_fstype);
+        free(krun_root_options);
 
         chdir("/newroot");
 
@@ -1278,7 +1279,7 @@ int main(int argc, char **argv)
 #endif
     krun_init = getenv("KRUN_INIT");
     if (krun_init) {
-        exec_argv[0] = krun_init;
+        exec_argv[0] = strdup(krun_init);
     } else if (config_argv) {
         exec_argv = config_argv;
     } else {
