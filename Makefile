@@ -134,6 +134,12 @@ $(INIT_BINARY): $(INIT_SRC) $(SYSROOT_TARGET)
 	$(CC_LINUX) -O2 -static -Wall $(INIT_DEFS) -o $@ $(INIT_SRC) $(INIT_DEFS)
 endif
 
+INIT_BINARY_BSD = init/init-freebsd
+ifeq ($(OS),FreeBSD)
+$(INIT_BINARY_BSD): $(INIT_SRC)
+	clang -O2 -static -Wall $(INIT_DEFS) -lutil -o $@ $(INIT_SRC) $(INIT_DEFS)
+endif
+
 NITRO_INIT_BINARY= init/nitro/init
 $(NITRO_INIT_BINARY): $(NITRO_INIT_SRC)
 	$(CC) -O2 -static -Wall $(NITRO_INIT_LD_FLAGS) -o $@ $(NITRO_INIT_SRC) $(NITRO_INIT_LD_FLAGS)
