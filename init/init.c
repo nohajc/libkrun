@@ -18,10 +18,10 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #if __FreeBSD__
-#include <sys/param.h>
-#include <sys/mount.h>
-#include <libutil.h>
 #include <kenv.h>
+#include <libutil.h>
+#include <sys/mount.h>
+#include <sys/param.h>
 #else
 #include <sys/statfs.h>
 #endif
@@ -65,26 +65,28 @@ char DEFAULT_KRUN_INIT[] = "/bin/sh";
 #define b64_pton __b64_pton
 /* There are no header files for these functions. */
 
-int b64_ntop(unsigned char const *src, size_t srclength,
-		             char *target, size_t targsize);
+int b64_ntop(unsigned char const *src, size_t srclength, char *target,
+             size_t targsize);
 int b64_pton(char const *src, unsigned char *target, size_t targsize);
 
 static char kenv_value[KENV_MVALLEN + 1];
 
 // TODO: may leak memory; fix later
-static char* get_kenv(const char* name) {
-	if (kenv(KENV_GET, name, kenv_value, KENV_MVALLEN + 1) < 0) {
-		return NULL;
-	}
-	return strdup(kenv_value);
+static char *get_kenv(const char *name)
+{
+    if (kenv(KENV_GET, name, kenv_value, KENV_MVALLEN + 1) < 0) {
+        return NULL;
+    }
+    return strdup(kenv_value);
 }
 
-static int get_krun_init_argv_flat(char* buf, int len) {
-	char* argv_b64 = get_kenv("KRUN_INIT_ARGV_B64");
-	if (argv_b64 == NULL) {
-		return 0;
-	}
-	return b64_pton(argv_b64, (unsigned char*)buf, len);
+static int get_krun_init_argv_flat(char *buf, int len)
+{
+    char *argv_b64 = get_kenv("KRUN_INIT_ARGV_B64");
+    if (argv_b64 == NULL) {
+        return 0;
+    }
+    return b64_pton(argv_b64, (unsigned char *)buf, len);
 }
 
 #define getenv get_kenv
@@ -96,39 +98,38 @@ static int get_krun_init_argv_flat(char* buf, int len) {
  * Start a session and allocate a controlling terminal.
  * Only called by children of init after forking.
  */
-static void
-open_console(void)
+static void open_console(void)
 {
-        int fd;
+    int fd;
 
-        /*
-         * Try to open /dev/console.  Open the device with O_NONBLOCK to
-         * prevent potential blocking on a carrier.
-         */
-        revoke(_PATH_CONSOLE);
-        if ((fd = open(_PATH_CONSOLE, O_RDWR | O_NONBLOCK)) != -1) {
-                (void)fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
-                if (login_tty(fd) == 0)
-                        return;
-                close(fd);
-        }
+    /*
+     * Try to open /dev/console.  Open the device with O_NONBLOCK to
+     * prevent potential blocking on a carrier.
+     */
+    revoke(_PATH_CONSOLE);
+    if ((fd = open(_PATH_CONSOLE, O_RDWR | O_NONBLOCK)) != -1) {
+        (void)fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+        if (login_tty(fd) == 0)
+            return;
+        close(fd);
+    }
 
-        /* No luck.  Log output to file if possible. */
-        if ((fd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
-                _exit(1);
-        }
-        if (fd != STDIN_FILENO) {
-                dup2(fd, STDIN_FILENO);
-                close(fd);
-        }
-        fd = open(_PATH_INITLOG, O_WRONLY | O_APPEND | O_CREAT, 0644);
-        if (fd == -1)
-                dup2(STDIN_FILENO, STDOUT_FILENO);
-        else if (fd != STDOUT_FILENO) {
-                dup2(fd, STDOUT_FILENO);
-                close(fd);
-        }
-        dup2(STDOUT_FILENO, STDERR_FILENO);
+    /* No luck.  Log output to file if possible. */
+    if ((fd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
+        _exit(1);
+    }
+    if (fd != STDIN_FILENO) {
+        dup2(fd, STDIN_FILENO);
+        close(fd);
+    }
+    fd = open(_PATH_INITLOG, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd == -1)
+        dup2(STDIN_FILENO, STDOUT_FILENO);
+    else if (fd != STDOUT_FILENO) {
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+    }
+    dup2(STDOUT_FILENO, STDERR_FILENO);
 }
 #endif
 
@@ -534,40 +535,6 @@ static int mount_filesystems()
 
     /* May fail if already exists and that's fine. */
     symlink("/proc/self/fd", "/dev/fd");
-#elif 0
-    struct iovec iov[4];
-    char *s;
-    int i;
-
-    char _fstype[]  = "fstype";
-    char _devfs[]   = "devfs";
-    char _fspath[]  = "fspath";
-    char _path_dev[]= "/dev";
-
-    iov[0].iov_base = _fstype;
-    iov[0].iov_len = sizeof(_fstype);
-    iov[1].iov_base = _devfs;
-    iov[1].iov_len = sizeof(_devfs);
-    iov[2].iov_base = _fspath;
-    iov[2].iov_len = sizeof(_fspath);
-    /*
-     * Try to avoid the trailing slash in _PATH_DEV.
-     * Be *very* defensive.
-     */
-    s = strdup("/dev");
-    if (s != NULL) {
-        i = strlen(s);
-        if (i > 0 && s[i - 1] == '/')
-            s[i - 1] = '\0';
-        iov[3].iov_base = s;
-        iov[3].iov_len = strlen(s) + 1;
-    } else {
-        iov[3].iov_base = _path_dev;
-        iov[3].iov_len = sizeof(_path_dev);
-    }
-    nmount(iov, 4, 0);
-    if (s != NULL)
-        free(s);
 #endif
     return 0;
 }
@@ -1326,7 +1293,8 @@ int main(int argc, char **argv)
     int j = 0;
     while (j < argv_flat_len) {
         exec_argv[i++] = &argv_flat[j];
-        for (; j < argv_flat_len && argv_flat[j] != 0; j++) {}
+        for (; j < argv_flat_len && argv_flat[j] != 0; j++) {
+        }
         j++;
     }
     exec_argv[i] = NULL;
@@ -1362,7 +1330,7 @@ int main(int argc, char **argv)
             exit(125);
         }
 #else
-	open_console();
+        open_console();
 #endif
         if (execvp(exec_argv[0], exec_argv) < 0) {
             saved_errno = errno;
