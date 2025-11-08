@@ -1279,10 +1279,10 @@ int main(int argc, char **argv)
         chdir(config_workdir);
     }
 
-#if __linux__
-    exec_argv = argv;
-#else
+#if __FreeBSD__
     exec_argv = malloc(MAX_ARGS * sizeof(char *));
+#else
+    exec_argv = argv;
 #endif
     krun_init = getenv("KRUN_INIT");
     if (krun_init) {
@@ -1333,12 +1333,12 @@ int main(int argc, char **argv)
     }
     if (child == 0) { // child
     exec_init:
-#if __linux__
+#if __FreeBSD__
+        open_console();
+#else
         if (setup_redirects() < 0) {
             exit(125);
         }
-#else
-        open_console();
 #endif
         if (execvp(exec_argv[0], exec_argv) < 0) {
             saved_errno = errno;
