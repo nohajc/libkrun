@@ -134,10 +134,18 @@ $(INIT_BINARY): $(INIT_SRC) $(SYSROOT_TARGET)
 	$(CC_LINUX) -O2 -static -Wall $(INIT_DEFS) -o $@ $(INIT_SRC) $(INIT_DEFS)
 endif
 
+ifeq ($(BUILD_BSD_INIT),1)
+ifeq ($(SYSROOT_BSD),)
+# Build on FreeBSD host
+CC_BSD=$(CC)
+else
+# Cross-compile on macOS with the LLVM linker (brew install lld)
+CC_BSD=clang -target $(ARCH)-unknown-freebsd -fuse-ld=lld -stdlib=libc++ -Wl,-strip-debug --sysroot $(SYSROOT_BSD)
+endif
+
 INIT_BINARY_BSD = init/init-freebsd
-ifeq ($(OS),FreeBSD)
 $(INIT_BINARY_BSD): $(INIT_SRC)
-	clang -std=c23 -O2 -static -Wall $(INIT_DEFS) -lutil -o $@ $(INIT_SRC) $(INIT_DEFS)
+	$(CC_BSD) -std=c23 -O2 -static -Wall $(INIT_DEFS) -lutil -o $@ $(INIT_SRC) $(INIT_DEFS)
 endif
 
 NITRO_INIT_BINARY= init/nitro/init
@@ -176,7 +184,7 @@ clean-sysroot:
 	rm -rf $(ROOTFS_DIR)
 
 
-$(LIBRARY_RELEASE_$(OS)): $(INIT_BINARY)
+$(LIBRARY_RELEASE_$(OS)): $(INIT_BINARY) $(INIT_BINARY_BSD)
 	cargo build --release $(FEATURE_FLAGS)
 ifeq ($(SEV),1)
 	mv target/release/libkrun.so target/release/$(KRUN_BASE_$(OS))
@@ -195,7 +203,7 @@ endif
 endif
 	cp target/release/$(KRUN_BASE_$(OS)) $(LIBRARY_RELEASE_$(OS))
 
-$(LIBRARY_DEBUG_$(OS)): $(INIT_BINARY)
+$(LIBRARY_DEBUG_$(OS)): $(INIT_BINARY) $(INIT_BINARY_BSD)
 	cargo build $(FEATURE_FLAGS)
 ifeq ($(SEV),1)
 	mv target/debug/libkrun.so target/debug/$(KRUN_BASE_$(OS))
@@ -227,7 +235,12 @@ install: libkrun.pc
 	cd $(DESTDIR)$(PREFIX)/$(LIBDIR_$(OS))/ ; ln -sf $(KRUN_BINARY_$(OS)) $(KRUN_SONAME_$(OS)) ; ln -sf $(KRUN_SONAME_$(OS)) $(KRUN_BASE_$(OS))
 
 clean:
+ifeq ($(BUILD_INIT),1)
 	rm -f $(INIT_BINARY)
+endif
+ifeq ($(BUILD_BSD_INIT),1)
+	rm -f $(INIT_BINARY_BSD)
+endif
 	cargo clean
 	rm -rf test-prefix
 	cd tests; cargo clean
