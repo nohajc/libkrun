@@ -1122,6 +1122,14 @@ int try_mount(const char *source, const char *target, const char *fstype,
 }
 #endif
 
+char *clone_str(const char *str)
+{
+    if (str == NULL) {
+        return NULL;
+    }
+    return strdup(str);
+}
+
 int main(int argc, char **argv)
 {
     struct ifreq ifr;
@@ -1179,15 +1187,15 @@ int main(int argc, char **argv)
     }
 
 #if __linux__
-    krun_root = strdup(getenv("KRUN_BLOCK_ROOT_DEVICE"));
+    krun_root = clone_str(getenv("KRUN_BLOCK_ROOT_DEVICE"));
     if (krun_root) {
         if (mkdir("/newroot", 0755) < 0 && errno != EEXIST) {
             perror("mkdir(/newroot)");
             exit(-1);
         }
 
-        krun_root_fstype = strdup(getenv("KRUN_BLOCK_ROOT_FSTYPE"));
-        krun_root_options = strdup(getenv("KRUN_BLOCK_ROOT_OPTIONS"));
+        krun_root_fstype = clone_str(getenv("KRUN_BLOCK_ROOT_FSTYPE"));
+        krun_root_options = clone_str(getenv("KRUN_BLOCK_ROOT_OPTIONS"));
 
         if (try_mount(krun_root, "/newroot", krun_root_fstype, 0,
                       krun_root_options) < 0) {
@@ -1286,7 +1294,7 @@ int main(int argc, char **argv)
 #endif
     krun_init = getenv("KRUN_INIT");
     if (krun_init) {
-        exec_argv[0] = strdup(krun_init);
+        exec_argv[0] = clone_str(krun_init);
     } else if (config_argv) {
         exec_argv = config_argv;
     } else {
