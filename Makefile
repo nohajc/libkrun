@@ -85,6 +85,8 @@ OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 DEBIAN_DIST ?= bookworm
 ROOTFS_DIR = linux-sysroot
+FREEBSD_VERSION ?= 14.3-RELEASE
+FREEBSD_ROOTFS_DIR = freebsd-sysroot
 
 KRUN_BINARY_Linux = libkrun$(VARIANT).so.$(FULL_VERSION)
 KRUN_SONAME_Linux = libkrun$(VARIANT).so.$(ABI_VERSION)
@@ -134,17 +136,25 @@ $(INIT_BINARY): $(INIT_SRC) $(SYSROOT_TARGET)
 	$(CC_LINUX) -O2 -static -Wall $(INIT_DEFS) -o $@ $(INIT_SRC) $(INIT_DEFS)
 endif
 
-ifeq ($(BUILD_BSD_INIT),1)
+ifeq ($(OS),Darwin)
+# If SYSROOT_BSD is not set and we're on macOS, generate sysroot automatically
 ifeq ($(SYSROOT_BSD),)
-# Build on FreeBSD host
-CC_BSD=$(CC)
+SYSROOT_BSD = $(FREEBSD_ROOTFS_DIR)
+SYSROOT_BSD_TARGET = $(FREEBSD_ROOTFS_DIR)/.sysroot_ready
 else
+SYSROOT_BSD_TARGET =
+endif
 # Cross-compile on macOS with the LLVM linker (brew install lld)
 CC_BSD=clang -target $(ARCH)-unknown-freebsd -fuse-ld=lld -stdlib=libc++ -Wl,-strip-debug --sysroot $(SYSROOT_BSD)
+else
+# Build on FreeBSD host
+CC_BSD=$(CC)
+SYSROOT_BSD_TARGET =
 endif
 
+ifeq ($(BUILD_BSD_INIT),1)
 INIT_BINARY_BSD = init/init-freebsd
-$(INIT_BINARY_BSD): $(INIT_SRC)
+$(INIT_BINARY_BSD): $(INIT_SRC) $(SYSROOT_BSD_TARGET)
 	$(CC_BSD) -std=c23 -O2 -static -Wall $(INIT_DEFS) -lutil -o $@ $(INIT_SRC) $(INIT_DEFS)
 endif
 
@@ -180,8 +190,24 @@ $(PACKAGES_FILE):
 	@mkdir -p $(ROOTFS_TMP)
 	@curl -fL -o $@ https://deb.debian.org/debian/dists/$(DEBIAN_DIST)/main/binary-$(ARCH)/Packages.xz
 
+# FreeBSD sysroot preparation rules for cross-compilation on macOS
+FREEBSD_BASE_TXZ = $(FREEBSD_ROOTFS_DIR)/base.txz
+
+.INTERMEDIATE: $(FREEBSD_BASE_TXZ)
+
+$(FREEBSD_ROOTFS_DIR)/.sysroot_ready: $(FREEBSD_BASE_TXZ)
+	@echo "Extracting FreeBSD base to $(FREEBSD_ROOTFS_DIR)..."
+	@cd $(FREEBSD_ROOTFS_DIR) && tar xJf base.txz 2>/dev/null || true
+	@touch $@
+
+$(FREEBSD_BASE_TXZ):
+	@echo "Downloading FreeBSD $(FREEBSD_VERSION) base for $(ARCH)..."
+	@mkdir -p $(FREEBSD_ROOTFS_DIR)
+	@curl -fL -o $@ https://download.freebsd.org/releases/$(ARCH)/$(FREEBSD_VERSION)/base.txz
+
 clean-sysroot:
 	rm -rf $(ROOTFS_DIR)
+	rm -rf $(FREEBSD_ROOTFS_DIR)
 
 
 $(LIBRARY_RELEASE_$(OS)): $(INIT_BINARY) $(INIT_BINARY_BSD)
