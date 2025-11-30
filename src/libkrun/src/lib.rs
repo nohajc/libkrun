@@ -1261,7 +1261,10 @@ pub unsafe extern "C" fn krun_set_exec(
             .collect()
     };
 
-    env += &format!(" KRUN_INIT_ARGV_B64={}", BASE64_STANDARD.encode(&args_raw));
+    // KRUN_INIT_ARGVXX="<base64>" must have at most 128 bytes (KENV_MVALLEN on FreeBSD)
+    for (i, args_part) in args_raw.chunks(78).into_iter().enumerate() {
+        env += &format!(" KRUN_INIT_ARGV{}={}", i, BASE64_STANDARD.encode(args_part));
+    }
 
     match CTX_MAP.lock().unwrap().entry(ctx_id) {
         Entry::Occupied(mut ctx_cfg) => {

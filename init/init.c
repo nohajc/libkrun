@@ -78,13 +78,27 @@ static char *get_kenv(const char *name)
     return kenv_value;
 }
 
-static int get_krun_init_argv_flat(char *buf, int len)
+static int get_krun_init_argv_flat(char *buf, int buf_len)
 {
-    char *argv_b64 = get_kenv("KRUN_INIT_ARGV_B64");
-    if (argv_b64 == NULL) {
-        return 0;
+    int len_total = 0;
+    int len_part;
+    char *buf_ptr = buf;
+    char name_buf[32];
+    int idx = 0;
+
+    while (true) {
+        snprintf(name_buf, sizeof(name_buf), "KRUN_INIT_ARGV%d", idx++);
+        char *argv_b64 = get_kenv(name_buf);
+        if (!argv_b64) {
+            break;
+        }
+        len_part =
+            b64_pton(argv_b64, (unsigned char *)buf_ptr, buf_len - len_total);
+        buf_ptr += len_part;
+        len_total += len_part;
     }
-    return b64_pton(argv_b64, (unsigned char *)buf, len);
+
+    return len_total;
 }
 
 #define getenv get_kenv
@@ -1153,6 +1167,10 @@ int main(int argc, char **argv)
     char *rlimits;
     char **config_argv, **exec_argv;
 
+#if __FreeBSD__
+    open_console();
+#endif
+
 #ifdef TDX
     if (mkdir("/tmp", 0755) < 0 && errno != EEXIST) {
         perror("mkdir(/tmp)");
@@ -1303,8 +1321,8 @@ int main(int argc, char **argv)
 
 #if __FreeBSD__
     int i = 1;
-    static char argv_flat[KENV_MVALLEN + 1];
-    int argv_flat_len = get_krun_init_argv_flat(argv_flat, KENV_MVALLEN + 1);
+    static char argv_flat[2048];
+    int argv_flat_len = get_krun_init_argv_flat(argv_flat, 2048);
 
     int j = 0;
     while (j < argv_flat_len) {
