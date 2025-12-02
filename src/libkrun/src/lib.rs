@@ -1262,7 +1262,7 @@ pub unsafe extern "C" fn krun_set_exec(
     };
 
     // KRUN_INIT_ARGVXX="<base64>" must have at most 128 bytes (KENV_MVALLEN on FreeBSD)
-    for (i, args_part) in args_raw.chunks(78).into_iter().enumerate() {
+    for (i, args_part) in args_raw.chunks(78).enumerate() {
         env += &format!(" KRUN_INIT_ARGV{}={}", i, BASE64_STANDARD.encode(args_part));
     }
 
