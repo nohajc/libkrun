@@ -81,6 +81,8 @@ ifeq ($(TIMESYNC),1)
     INIT_DEFS += -D__TIMESYNC__
 endif
 
+CLANG = /usr/bin/clang
+
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
 DEBIAN_DIST ?= bookworm
@@ -123,7 +125,7 @@ else
     SYSROOT_TARGET =
 endif
     # Cross-compile on macOS with the LLVM linker (brew install lld)
-    CC_LINUX=/usr/bin/clang -target $(ARCH)-linux-gnu -fuse-ld=lld -Wl,-strip-debug --sysroot $(SYSROOT_LINUX) -Wno-c23-extensions
+    CC_LINUX=$(CLANG) -target $(ARCH)-linux-gnu -fuse-ld=lld -Wl,-strip-debug --sysroot $(SYSROOT_LINUX) -Wno-c23-extensions
 else
     # Build on Linux host
     CC_LINUX=$(CC)
@@ -145,7 +147,7 @@ else
     SYSROOT_BSD_TARGET =
 endif
     # Cross-compile on macOS with the LLVM linker (brew install lld)
-    CC_BSD=clang -target $(ARCH)-unknown-freebsd -fuse-ld=lld -stdlib=libc++ -Wl,-strip-debug --sysroot $(SYSROOT_BSD)
+    CC_BSD=$(CLANG) -target $(ARCH)-unknown-freebsd -fuse-ld=lld -stdlib=libc++ -Wl,-strip-debug --sysroot $(SYSROOT_BSD)
 else
     # Build on FreeBSD host
     CC_BSD=$(CC)
