@@ -139,17 +139,17 @@ endif
 ifeq ($(OS),Darwin)
 # If SYSROOT_BSD is not set and we're on macOS, generate sysroot automatically
 ifeq ($(SYSROOT_BSD),)
-SYSROOT_BSD = $(FREEBSD_ROOTFS_DIR)
-SYSROOT_BSD_TARGET = $(FREEBSD_ROOTFS_DIR)/.sysroot_ready
+    SYSROOT_BSD = $(FREEBSD_ROOTFS_DIR)
+    SYSROOT_BSD_TARGET = $(FREEBSD_ROOTFS_DIR)/.sysroot_ready
 else
-SYSROOT_BSD_TARGET =
+    SYSROOT_BSD_TARGET =
 endif
-# Cross-compile on macOS with the LLVM linker (brew install lld)
-CC_BSD=clang -target $(ARCH)-unknown-freebsd -fuse-ld=lld -stdlib=libc++ -Wl,-strip-debug --sysroot $(SYSROOT_BSD)
+    # Cross-compile on macOS with the LLVM linker (brew install lld)
+    CC_BSD=clang -target $(ARCH)-unknown-freebsd -fuse-ld=lld -stdlib=libc++ -Wl,-strip-debug --sysroot $(SYSROOT_BSD)
 else
-# Build on FreeBSD host
-CC_BSD=$(CC)
-SYSROOT_BSD_TARGET =
+    # Build on FreeBSD host
+    CC_BSD=$(CC)
+    SYSROOT_BSD_TARGET =
 endif
 
 ifeq ($(BUILD_BSD_INIT),1)
