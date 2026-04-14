@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::io;
 use std::result;
-#[cfg(not(test))]
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -598,7 +597,7 @@ enum VcpuEmulation {
     WaitForEventTimeout(Duration),
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     #[cfg(target_arch = "x86_64")]
     use crossbeam_channel::{unbounded, RecvTimeoutError};
