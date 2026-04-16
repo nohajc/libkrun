@@ -2343,6 +2343,7 @@ pub mod tests {
     use super::*;
     use crate::vmm_config::kernel_bundle::KernelBundle;
 
+    #[allow(unused)]
     fn default_guest_memory(
         mem_size_mib: usize,
     ) -> std::result::Result<
