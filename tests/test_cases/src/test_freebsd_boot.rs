@@ -20,8 +20,7 @@ mod host {
         }
 
         fn start_vm(self: Box<Self>, test_setup: TestSetup) -> anyhow::Result<()> {
-            let assets =
-                freebsd_assets().expect("FreeBSD assets must be present when test runs");
+            let assets = freebsd_assets().expect("FreeBSD assets must be present when test runs");
             unsafe {
                 let ctx = krun_call_u32!(krun_create_ctx())?;
                 setup_kernel_and_enter(ctx, test_setup, assets)?;
@@ -30,9 +29,7 @@ mod host {
         }
 
         fn should_run(&self) -> ShouldRun {
-            ShouldRun::requires_freebsd_assets(
-                "KRUN_TEST_FREEBSD_KERNEL_PATH / KRUN_TEST_FREEBSD_ISO_PATH not set or files missing",
-            )
+            ShouldRun::requires_freebsd_assets("init-freebsd not compiled")
         }
     }
 }
