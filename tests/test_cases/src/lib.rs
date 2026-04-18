@@ -16,6 +16,8 @@ use test_multiport_console::TestMultiportConsole;
 mod test_freebsd_boot;
 use test_freebsd_boot::TestFreeBsdBoot;
 
+pub mod freebsd_guest;
+
 pub enum ShouldRun {
     Yes,
     No(&'static str),
@@ -96,7 +98,7 @@ compile_error!("Cannot enable both guest and host in the same binary!");
 mod common;
 
 #[cfg(feature = "host")]
-mod common_freebsd;
+pub mod common_freebsd;
 
 #[cfg(feature = "host")]
 mod krun;
