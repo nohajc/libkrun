@@ -78,6 +78,8 @@ mod host {
     }
 }
 
+// Vsock is only available on Linux guests.
+#[cfg(target_os = "linux")]
 #[guest]
 mod guest {
     use super::*;
@@ -111,3 +113,7 @@ mod guest {
         }
     }
 }
+
+// Stub impl so the guest-agent binary compiles on non-Linux targets (vsock test won't be dispatched there).
+#[cfg(all(feature = "guest", not(target_os = "linux")))]
+impl crate::Test for TestVsockGuestConnect {}
