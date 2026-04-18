@@ -64,6 +64,16 @@ fn create_config_iso(test_case: &str, tmp_dir: &Path) -> anyhow::Result<PathBuf>
     Ok(iso_path)
 }
 
+/// Normalize serial-console line endings for FreeBSD output assertions.
+///
+/// FreeBSD's serial console emits CRLF (`\r\n`); strip the `\r` so that
+/// test `check()` overrides can compare against plain `\n`-terminated strings.
+pub fn normalize_serial_output(bytes: Vec<u8>) -> String {
+    String::from_utf8_lossy(&bytes)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+}
+
 /// Boot a FreeBSD guest with `init-freebsd` and enter it.
 ///
 /// Parallel to [`crate::common::setup_fs_and_enter`] for Linux guests:
