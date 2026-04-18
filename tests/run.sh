@@ -92,23 +92,24 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 
 	if [ "$ARCH" = "x86_64" ]; then
 		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_LINKER="clang"
-		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=x86_64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=x86_64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
 		FREEBSD_CARGO_CMD="cargo build --target=${FREEBSD_TARGET} -p guest-agent"
 	else
 		# aarch64-unknown-freebsd has no prebuilt stdlib in rustup; build it from source with -Z build-std.
 		export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_LINKER="clang"
 		if [ "$OS" = "Darwin" ]; then
-			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=-stdlib=libc++ -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=-stdlib=libc++ -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
 		else
-			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
 		fi
-		FREEBSD_CARGO_CMD="cargo +nightly-2026-01-25 build -Z build-std --target=${FREEBSD_TARGET} -p guest-agent"
+		FREEBSD_CARGO_CMD="cargo +nightly-2026-01-25 build -Z build-std=std,panic_abort --target=${FREEBSD_TARGET} -p guest-agent"
 	fi
 
 	echo "Cross-compiling guest-agent for ${FREEBSD_TARGET}"
 	if $FREEBSD_CARGO_CMD; then
 		# Build the FreeBSD test rootfs ISO: init-freebsd + FreeBSD guest-agent at the root.
 		FREEBSD_ISO_STAGING=$(mktemp -d)
+		mkdir -p "${FREEBSD_ISO_STAGING}/dev" "${FREEBSD_ISO_STAGING}/tmp" "${FREEBSD_ISO_STAGING}/mnt"
 		cp "${FREEBSD_INIT}" "${FREEBSD_ISO_STAGING}/init-freebsd"
 		cp "target/${FREEBSD_TARGET}/debug/guest-agent" "${FREEBSD_ISO_STAGING}/guest-agent"
 		chmod +x "${FREEBSD_ISO_STAGING}/init-freebsd" "${FREEBSD_ISO_STAGING}/guest-agent"
