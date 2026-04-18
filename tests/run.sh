@@ -90,18 +90,21 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 	FREEBSD_TARGET="${ARCH}-unknown-freebsd"
 	FREEBSD_SYSROOT_ABS=$(cd "${FREEBSD_SYSROOT}" && pwd)
 
+	# Common FreeBSD linker configuration
+	export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_LINKER="clang"
+	export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_LINKER="clang"
+
+	# Common RUSTFLAGS for FreeBSD targets
+	FREEBSD_RUSTFLAGS_BASE="-C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
+
 	if [ "$ARCH" = "x86_64" ]; then
-		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_LINKER="clang"
-		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=x86_64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
+		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=x86_64-unknown-freebsd ${FREEBSD_RUSTFLAGS_BASE}"
 		FREEBSD_CARGO_CMD="cargo build --target=${FREEBSD_TARGET} -p guest-agent"
 	else
 		# aarch64-unknown-freebsd has no prebuilt stdlib in rustup; build it from source with -Z build-std.
-		export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_LINKER="clang"
-		if [ "$OS" = "Darwin" ]; then
-			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=-stdlib=libc++ -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
-		else
-			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS} -C target-feature=+crt-static"
-		fi
+		FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd ${FREEBSD_RUSTFLAGS_BASE}"
+		[ "$OS" = "Darwin" ] && FREEBSD_RUSTFLAGS="${FREEBSD_RUSTFLAGS} -C link-arg=-stdlib=libc++"
+		export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="${FREEBSD_RUSTFLAGS}"
 		FREEBSD_CARGO_CMD="cargo +nightly-2026-01-25 build -Z build-std=std,panic_abort --target=${FREEBSD_TARGET} -p guest-agent"
 	fi
 
