@@ -33,6 +33,13 @@ endif
 ifeq ($(VIRGL_RESOURCE_MAP2),1)
 	FEATURE_FLAGS += --features virgl_resource_map2
 endif
+# Test targets require the block device (BLK) feature for FreeBSD disk tests.
+# Enable automatically unless the user explicitly set BLK to a value.
+ifeq ($(BLK),)
+    ifneq ($(filter test test-prefix,$(MAKECMDGOALS)),)
+        BLK := 1
+    endif
+endif
 ifeq ($(BLK),1)
     FEATURE_FLAGS += --features blk
 endif

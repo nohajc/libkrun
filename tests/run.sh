@@ -51,6 +51,78 @@ fi
 
 export KRUN_TEST_GUEST_AGENT_PATH="target/$GUEST_TARGET/debug/guest-agent"
 
+# --- FreeBSD guest support ---
+FREEBSD_SYSROOT="../freebsd-sysroot"
+FREEBSD_INIT="../init/init-freebsd"
+
+# Download FreeBSD kernel if KRUN_TEST_FREEBSD_KERNEL_PATH is not already set.
+# The kernel binary is cached in target/freebsd-kernel/ and reused on subsequent runs.
+if [ -z "${KRUN_TEST_FREEBSD_KERNEL_PATH}" ]; then
+	if [ "$ARCH" = "x86_64" ]; then
+		FREEBSD_KERNEL_URL="https://download.freebsd.org/releases/amd64/14.4-RELEASE/kernel.txz"
+		FREEBSD_KERNEL_BIN="kernel"
+	else
+		FREEBSD_KERNEL_URL="https://download.freebsd.org/releases/arm64/aarch64/14.4-RELEASE/kernel.txz"
+		FREEBSD_KERNEL_BIN="kernel.bin"
+	fi
+	FREEBSD_KERNEL_DIR="target/freebsd-kernel"
+	FREEBSD_KERNEL_PATH="${FREEBSD_KERNEL_DIR}/boot/kernel/${FREEBSD_KERNEL_BIN}"
+	if [ ! -f "${FREEBSD_KERNEL_PATH}" ]; then
+		echo "Downloading FreeBSD 14.4-RELEASE kernel..."
+		mkdir -p "${FREEBSD_KERNEL_DIR}"
+		FREEBSD_KERNEL_TXZ=$(mktemp)
+		if curl -fL -o "${FREEBSD_KERNEL_TXZ}" "${FREEBSD_KERNEL_URL}"; then
+			tar xJf "${FREEBSD_KERNEL_TXZ}" -C "${FREEBSD_KERNEL_DIR}" \
+				"./boot/kernel/${FREEBSD_KERNEL_BIN}"
+			rm -f "${FREEBSD_KERNEL_TXZ}"
+		else
+			echo "WARNING: Failed to download FreeBSD kernel; FreeBSD tests will be skipped."
+			rm -f "${FREEBSD_KERNEL_TXZ}"
+		fi
+	fi
+	if [ -f "${FREEBSD_KERNEL_PATH}" ]; then
+		export KRUN_TEST_FREEBSD_KERNEL_PATH="${FREEBSD_KERNEL_PATH}"
+		echo "FreeBSD kernel: ${KRUN_TEST_FREEBSD_KERNEL_PATH}"
+	fi
+fi
+
+if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
+	FREEBSD_TARGET="${ARCH}-unknown-freebsd"
+	FREEBSD_SYSROOT_ABS=$(cd "${FREEBSD_SYSROOT}" && pwd)
+
+	if [ "$ARCH" = "x86_64" ]; then
+		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_LINKER="clang"
+		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=x86_64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+	else
+		export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_LINKER="clang"
+		if [ "$OS" = "Darwin" ]; then
+			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=-stdlib=libc++ -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+		else
+			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+		fi
+	fi
+
+	echo "Cross-compiling guest-agent for ${FREEBSD_TARGET}"
+	if cargo build --target="${FREEBSD_TARGET}" -p guest-agent; then
+		# Build the FreeBSD test rootfs ISO: init-freebsd + FreeBSD guest-agent at the root.
+		FREEBSD_ISO_STAGING=$(mktemp -d)
+		cp "${FREEBSD_INIT}" "${FREEBSD_ISO_STAGING}/init-freebsd"
+		cp "target/${FREEBSD_TARGET}/debug/guest-agent" "${FREEBSD_ISO_STAGING}/guest-agent"
+		chmod +x "${FREEBSD_ISO_STAGING}/init-freebsd" "${FREEBSD_ISO_STAGING}/guest-agent"
+		FREEBSD_ISO_PATH="target/freebsd-test-rootfs.iso"
+		bsdtar cf "${FREEBSD_ISO_PATH}" --format=iso9660 -C "${FREEBSD_ISO_STAGING}" .
+		rm -rf "${FREEBSD_ISO_STAGING}"
+		echo "FreeBSD test rootfs ISO: ${FREEBSD_ISO_PATH}"
+		export KRUN_TEST_FREEBSD_ISO_PATH="${FREEBSD_ISO_PATH}"
+	else
+		echo "WARNING: guest-agent build for ${FREEBSD_TARGET} failed; FreeBSD tests will be skipped."
+		echo "(Run: rustup target add ${FREEBSD_TARGET})"
+	fi
+else
+	echo "FreeBSD sysroot or init/init-freebsd not found; FreeBSD tests will be skipped."
+	echo "(Run 'make' with BUILD_BSD_INIT=1 in the libkrun root to build FreeBSD assets.)"
+fi
+
 # Build runner args: pass through all arguments
 RUNNER_ARGS="$*"
 

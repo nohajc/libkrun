@@ -13,6 +13,9 @@ use test_tsi_tcp_guest_listen::TestTsiTcpGuestListen;
 mod test_multiport_console;
 use test_multiport_console::TestMultiportConsole;
 
+mod test_freebsd_boot;
+use test_freebsd_boot::TestFreeBsdBoot;
+
 pub enum ShouldRun {
     Yes,
     No(&'static str),
@@ -25,6 +28,23 @@ impl ShouldRun {
             ShouldRun::No(reason)
         } else {
             ShouldRun::Yes
+        }
+    }
+
+    /// Returns Yes if both `KRUN_TEST_FREEBSD_KERNEL_PATH` and `KRUN_TEST_FREEBSD_ISO_PATH`
+    /// are set and point to existing files, otherwise returns No with the given reason.
+    #[cfg(feature = "host")]
+    pub fn requires_freebsd_assets(reason: &'static str) -> Self {
+        let kernel_ok = std::env::var_os("KRUN_TEST_FREEBSD_KERNEL_PATH")
+            .map(|p| std::path::Path::new(&p).exists())
+            .unwrap_or(false);
+        let iso_ok = std::env::var_os("KRUN_TEST_FREEBSD_ISO_PATH")
+            .map(|p| std::path::Path::new(&p).exists())
+            .unwrap_or(false);
+        if kernel_ok && iso_ok {
+            ShouldRun::Yes
+        } else {
+            ShouldRun::No(reason)
         }
     }
 }
@@ -56,6 +76,7 @@ pub fn test_cases() -> Vec<TestCase> {
             Box::new(TestTsiTcpGuestListen::new()),
         ),
         TestCase::new("multiport-console", Box::new(TestMultiportConsole)),
+        TestCase::new("freebsd-boot", Box::new(TestFreeBsdBoot)),
     ]
 }
 
@@ -73,6 +94,9 @@ compile_error!("Cannot enable both guest and host in the same binary!");
 
 #[cfg(feature = "host")]
 mod common;
+
+#[cfg(feature = "host")]
+mod common_freebsd;
 
 #[cfg(feature = "host")]
 mod krun;
