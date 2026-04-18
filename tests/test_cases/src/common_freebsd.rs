@@ -2,8 +2,6 @@
 
 use anyhow::Context;
 use std::ffi::CString;
-use std::io;
-use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -50,7 +48,9 @@ fn create_config_iso(test_case: &str, tmp_dir: &Path) -> anyhow::Result<PathBuf>
             "--options",
             "volume-id=KRUN_CONFIG",
             "-C",
-            staging.to_str().context("config staging dir is not UTF-8")?,
+            staging
+                .to_str()
+                .context("config staging dir is not UTF-8")?,
             "krun_config.json",
         ])
         .status()
@@ -88,11 +88,7 @@ pub fn setup_kernel_and_enter(
         // FreeBSD requires a serial console; virtio console is not supported.
         // The subprocess stdout (fd 1) is piped by the runner — guest serial output appears there.
         krun_call!(krun_disable_implicit_console(ctx))?;
-        krun_call!(krun_add_serial_console_default(
-            ctx,
-            -1,
-            io::stdout().as_raw_fd(),
-        ))?;
+        krun_call!(krun_add_serial_console_default(ctx, 0, 1))?;
 
         // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
         krun_call!(krun_set_kernel(

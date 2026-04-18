@@ -54,12 +54,14 @@ FreeBSD guest tests run on Linux (amd64, arm64) and macOS (arm64) hosts. They re
 1. Install required tools:
    - **macOS**: `bsdtar` is built-in (`/usr/bin/bsdtar`)
    - **Linux**: `sudo apt-get install libarchive-tools` (provides `bsdtar`)
-   - Add the Rust target for your platform:
+   - **Linux/macOS amd64**: add the Rust cross-compilation target:
      ```bash
-     # Linux amd64 host
      rustup target add x86_64-unknown-freebsd
-     # Linux arm64 or macOS arm64 host
-     rustup target add aarch64-unknown-freebsd
+     ```
+   - **Linux/macOS arm64**: `aarch64-unknown-freebsd` has no prebuilt stdlib in rustup,
+     so a nightly toolchain is used with `-Z build-std` to build it from source:
+     ```bash
+     rustup toolchain install nightly-2026-01-25
      ```
 
 2. Build the FreeBSD sysroot and `init-freebsd` (from the libkrun root directory):

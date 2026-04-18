@@ -93,17 +93,20 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 	if [ "$ARCH" = "x86_64" ]; then
 		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_LINKER="clang"
 		export CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=x86_64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
+		FREEBSD_CARGO_CMD="cargo build --target=${FREEBSD_TARGET} -p guest-agent"
 	else
+		# aarch64-unknown-freebsd has no prebuilt stdlib in rustup; build it from source with -Z build-std.
 		export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_LINKER="clang"
 		if [ "$OS" = "Darwin" ]; then
 			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=-stdlib=libc++ -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
 		else
 			export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd -C link-arg=-fuse-ld=lld -C link-arg=--sysroot=${FREEBSD_SYSROOT_ABS}"
 		fi
+		FREEBSD_CARGO_CMD="cargo +nightly-2026-01-25 build -Z build-std --target=${FREEBSD_TARGET} -p guest-agent"
 	fi
 
 	echo "Cross-compiling guest-agent for ${FREEBSD_TARGET}"
-	if cargo build --target="${FREEBSD_TARGET}" -p guest-agent; then
+	if $FREEBSD_CARGO_CMD; then
 		# Build the FreeBSD test rootfs ISO: init-freebsd + FreeBSD guest-agent at the root.
 		FREEBSD_ISO_STAGING=$(mktemp -d)
 		cp "${FREEBSD_INIT}" "${FREEBSD_ISO_STAGING}/init-freebsd"
@@ -115,8 +118,13 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 		echo "FreeBSD test rootfs ISO: ${FREEBSD_ISO_PATH}"
 		export KRUN_TEST_FREEBSD_ISO_PATH="${FREEBSD_ISO_PATH}"
 	else
-		echo "WARNING: guest-agent build for ${FREEBSD_TARGET} failed; FreeBSD tests will be skipped."
-		echo "(Run: rustup target add ${FREEBSD_TARGET})"
+		if [ "$ARCH" = "x86_64" ]; then
+			echo "WARNING: guest-agent build for ${FREEBSD_TARGET} failed; FreeBSD tests will be skipped."
+			echo "(Run: rustup target add ${FREEBSD_TARGET})"
+		else
+			echo "WARNING: guest-agent build for ${FREEBSD_TARGET} failed; FreeBSD tests will be skipped."
+			echo "(Run: rustup toolchain install nightly-2026-01-25)"
+		fi
 	fi
 else
 	echo "FreeBSD sysroot or init/init-freebsd not found; FreeBSD tests will be skipped."
