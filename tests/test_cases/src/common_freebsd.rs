@@ -213,7 +213,7 @@ pub fn start_gvproxy(
     let _ = fs::remove_file(vfkit_sock_path);
 
     let mut cmd = Command::new(gvproxy_bin);
-    cmd.args(&[
+    cmd.args([
         "--listen",
         &format!("unix://{}", net_sock_path),
         "--listen-vfkit",
