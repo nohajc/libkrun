@@ -82,7 +82,11 @@ mod host {
             // time to start listening.
             let tcp_tester = self.tcp_tester;
             thread::spawn(move || {
-                thread::sleep(Duration::from_secs(5));
+                // TODO: debug gvproxy timing issue
+                // if we don't wait here, reading mesages
+                // in run_client leads to unexpected EOF
+                // and retrying doesn't help at that point
+                thread::sleep(Duration::from_millis(100));
                 tcp_tester.run_client();
             });
 
