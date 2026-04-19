@@ -189,6 +189,7 @@ pub fn start_gvproxy(
     gvproxy_bin: &Path,
     net_sock_path: &str,
     vfkit_sock_path: &str,
+    tmp_dir: &Path,
 ) -> anyhow::Result<Child> {
     // Clean up any stale sockets
     let _ = fs::remove_file(net_sock_path);
@@ -204,9 +205,21 @@ pub fn start_gvproxy(
         "-1",
     ]);
 
+    // Redirect gvproxy stdout/stderr to a log file inside the test tmp dir so
+    // test runners can inspect gvproxy output when debugging.
+    let log_path = tmp_dir.join("gvproxy_log.txt");
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .context("Failed to open gvproxy log file")?;
+    let log_file_clone = log_file
+        .try_clone()
+        .context("Failed to clone gvproxy log file handle")?;
+
     let child = cmd
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(log_file_clone))
+        .stderr(Stdio::from(log_file))
         .spawn()
         .context("Failed to start gvproxy")?;
 

@@ -67,8 +67,9 @@ mod host {
             // reliable pattern.
             let gvproxy_bin = gvproxy_path().expect("gvproxy must be available");
             let (net_sock, vfkit_sock) = gvproxy_socket_paths(&test_setup.tmp_dir);
-            let mut gvproxy_child = start_gvproxy(&gvproxy_bin, &net_sock, &vfkit_sock)
-                .expect("failed to start gvproxy");
+            let mut gvproxy_child =
+                start_gvproxy(&gvproxy_bin, &net_sock, &vfkit_sock, &test_setup.tmp_dir)
+                    .expect("failed to start gvproxy");
 
             let output = child.wait_with_output().unwrap();
             let _ = gvproxy_child.kill();
