@@ -143,6 +143,64 @@ if [ -n "${KRUN_TEST_BASE_DIR}" ]; then
 	RUNNER_ARGS="${RUNNER_ARGS} --base-dir ${KRUN_TEST_BASE_DIR}"
 fi
 
+# Resolve gvproxy path: prefer explicit env var, then cached binary in
+# target/, then PATH; finally fall back to downloading a cached copy.
+GV_DIR="target"
+GV_FILE="${GV_DIR}/gvproxy"
+mkdir -p "${GV_DIR}"
+
+if [ -z "${KRUN_TEST_GVPROXY_PATH}" ]; then
+	# 1) cached copy in target/
+	if [ -x "${GV_FILE}" ]; then
+		export KRUN_TEST_GVPROXY_PATH=$(realpath "${GV_FILE}")
+		echo "gvproxy (cached): ${KRUN_TEST_GVPROXY_PATH}"
+	else
+		# 2) search PATH
+		if [ "$OS" = "Darwin" ]; then
+			GV_NAMES="gvproxy gvproxy-darwin"
+		else
+			GV_NAMES="gvproxy gvproxy-linux-amd64 gvproxy-linux-arm64"
+		fi
+
+		for name in $GV_NAMES; do
+			if which "$name" >/dev/null 2>&1; then
+				GV_PATH=$(which "$name")
+				if [ -x "$GV_PATH" ]; then
+					export KRUN_TEST_GVPROXY_PATH="$GV_PATH"
+					echo "gvproxy: ${KRUN_TEST_GVPROXY_PATH}"
+					break
+				fi
+			fi
+		done
+
+		# 3) download into cached location if still unset
+		if [ -z "${KRUN_TEST_GVPROXY_PATH}" ]; then
+			GV_VERSION="0.8.8"
+			GV_URL_BASE="https://github.com/containers/gvisor-tap-vsock/releases/download/v${GV_VERSION}/gvproxy"
+
+			if [ "$OS" = "Darwin" ]; then
+				GV_URL="${GV_URL_BASE}-darwin"
+			else
+				if [ "$ARCH" = "x86_64" ]; then
+					GV_URL="${GV_URL_BASE}-linux-amd64"
+				else
+					GV_URL="${GV_URL_BASE}-linux-arm64"
+				fi
+			fi
+
+			echo "Downloading gvproxy to ${GV_FILE}..."
+			if curl -fL -o "${GV_FILE}" "${GV_URL}"; then
+				chmod +x "${GV_FILE}"
+				export KRUN_TEST_GVPROXY_PATH=$(realpath "${GV_FILE}")
+				echo "gvproxy: ${KRUN_TEST_GVPROXY_PATH}"
+			else
+				echo "WARNING: Failed to download gvproxy from ${GV_URL}; network tests may fail."
+				rm -f "${GV_FILE}"
+			fi
+		fi
+	fi
+fi
+
 if [ "$OS" != "Darwin" ] && [ -z "${KRUN_NO_UNSHARE}" ] && which unshare 2>&1 >/dev/null; then
 	unshare --user --map-root-user --net -- /bin/sh -c "ifconfig lo 127.0.0.1 && exec target/debug/runner ${RUNNER_ARGS}"
 else

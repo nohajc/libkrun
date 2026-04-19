@@ -33,30 +33,12 @@ pub fn freebsd_assets() -> Option<FreeBsdAssets> {
 
 /// Find gvproxy binary path from environment or search $PATH.
 pub fn gvproxy_path() -> Option<PathBuf> {
-    // First check explicit env var
     if let Ok(path) = std::env::var("KRUN_TEST_GVPROXY_PATH") {
         let p = PathBuf::from(&path);
         if p.exists() {
             return Some(p);
         }
     }
-
-    // Try to find in standard locations
-    let names = if cfg!(target_os = "macos") {
-        vec!["gvproxy", "gvproxy-darwin"]
-    } else {
-        vec!["gvproxy", "gvproxy-linux-amd64", "gvproxy-linux-arm64"]
-    };
-
-    for name in names {
-        if let Ok(output) = Command::new("which").arg(name).output() {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                return Some(PathBuf::from(path_str));
-            }
-        }
-    }
-
     None
 }
 
