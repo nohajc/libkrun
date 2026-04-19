@@ -52,7 +52,7 @@ mod host {
             let assets = freebsd_assets().expect("freebsd assets must be available");
 
             unsafe {
-                krun_call!(krun_set_log_level(KRUN_LOG_LEVEL_INFO))?;
+                krun_call!(krun_set_log_level(KRUN_LOG_LEVEL_TRACE))?;
                 let ctx = krun_call_u32!(krun_create_ctx())?;
                 krun_call!(krun_set_vm_config(ctx, 1, 512))?;
                 setup_kernel_and_enter_with_gvproxy(ctx, test_setup, assets)?;
