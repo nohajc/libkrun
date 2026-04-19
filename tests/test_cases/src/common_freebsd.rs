@@ -2,9 +2,11 @@
 
 use anyhow::Context;
 use std::ffi::CString;
+use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{krun_call, TestSetup};
 use krun_sys::*;
@@ -26,6 +28,35 @@ pub fn freebsd_assets() -> Option<FreeBsdAssets> {
         kernel_path,
         iso_path,
     })
+}
+
+/// Find gvproxy binary path from environment or search $PATH.
+pub fn gvproxy_path() -> Option<PathBuf> {
+    // First check explicit env var
+    if let Ok(path) = std::env::var("KRUN_TEST_GVPROXY_PATH") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    // Try to find in standard locations
+    let names = if cfg!(target_os = "macos") {
+        vec!["gvproxy", "gvproxy-darwin"]
+    } else {
+        vec!["gvproxy", "gvproxy-linux-amd64", "gvproxy-linux-arm64"]
+    };
+
+    for name in names {
+        if let Ok(output) = Command::new("which").arg(name).output() {
+            if output.status.success() {
+                let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                return Some(PathBuf::from(path_str));
+            }
+        }
+    }
+
+    None
 }
 
 /// Create a `KRUN_CONFIG`-labelled ISO inside the test's tmp directory and return its path.
@@ -72,6 +103,67 @@ pub fn normalize_serial_output(bytes: Vec<u8>) -> String {
     String::from_utf8_lossy(&bytes)
         .replace("\r\n", "\n")
         .replace('\r', "\n")
+}
+
+/// Generate a random MAC address for virtio-net device.
+fn random_mac_address() -> [u8; 6] {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+
+    let mut hasher = RandomState::new().build_hasher();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    hasher.write_u32(nanos);
+    let hash = hasher.finish();
+
+    [
+        0x52, // Xen OUI
+        0x54,
+        0x00,
+        ((hash >> 16) & 0xFF) as u8,
+        ((hash >> 8) & 0xFF) as u8,
+        (hash & 0xFF) as u8,
+    ]
+}
+
+/// Start gvproxy process and wait for sockets to be ready.
+fn start_gvproxy(
+    gvproxy_bin: &Path,
+    net_sock_path: &str,
+    vfkit_sock_path: &str,
+) -> anyhow::Result<Child> {
+    // Clean up any stale sockets
+    let _ = fs::remove_file(net_sock_path);
+    let _ = fs::remove_file(vfkit_sock_path);
+
+    let mut cmd = Command::new(gvproxy_bin);
+    cmd.args(&[
+        "--listen",
+        &format!("unix://{}", net_sock_path),
+        "--listen-vfkit",
+        &format!("unixgram://{}", vfkit_sock_path),
+        "--ssh-port",
+        "-1",
+    ]);
+
+    let child = cmd.spawn().context("Failed to start gvproxy")?;
+
+    // Wait for vfkit socket to be created (indicates gvproxy is ready)
+    let mut attempts = 0;
+    loop {
+        if Path::new(vfkit_sock_path).exists() {
+            break;
+        }
+        if attempts > 100 {
+            anyhow::bail!("Timeout waiting for gvproxy socket: {}", vfkit_sock_path);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        attempts += 1;
+    }
+
+    Ok(child)
 }
 
 /// Boot a FreeBSD guest with `init-freebsd` and enter it.
@@ -128,4 +220,134 @@ pub fn setup_kernel_and_enter(
         krun_call!(krun_start_enter(ctx))?;
     }
     unreachable!()
+}
+
+/// Boot a FreeBSD guest with gvproxy networking enabled.
+///
+/// This variant:
+/// - starts gvproxy process in the background
+/// - adds a virtio-net device configured to use gvproxy
+/// - cleans up gvproxy when test completes
+pub fn setup_kernel_and_enter_with_gvproxy(
+    ctx: u32,
+    test_setup: TestSetup,
+    assets: FreeBsdAssets,
+    gvproxy_bin: PathBuf,
+) -> anyhow::Result<()> {
+    let config_iso = create_config_iso(&test_setup.test_case, &test_setup.tmp_dir)?;
+
+    // Create unique socket paths for this test.
+    // Use 8 hex digits (lower 32 bits of nanoseconds) to keep paths short.
+    // macOS sockaddr_un.sun_path is 104 bytes including the null terminator (max 103
+    // chars), so long filenames inside deep test subdirectories overflow the limit.
+    let rand_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let short_id = format!("{:08x}", rand_id & 0xFFFF_FFFF);
+    let net_sock_path = test_setup
+        .tmp_dir
+        .join(format!("gvproxy-net-{}.sock", short_id));
+    let vfkit_sock_path = test_setup
+        .tmp_dir
+        .join(format!("gvproxy-vfkit-{}.sock", short_id));
+
+    let net_sock_str = net_sock_path
+        .to_str()
+        .context("net socket path not UTF-8")?
+        .to_string();
+    let vfkit_sock_str = vfkit_sock_path
+        .to_str()
+        .context("vfkit socket path not UTF-8")?
+        .to_string();
+
+    // Start gvproxy
+    let mut gvproxy_child = start_gvproxy(&gvproxy_bin, &net_sock_str, &vfkit_sock_str)?;
+
+    // Setup kernel (similar to non-gvproxy variant)
+    let kernel_cstr =
+        CString::new(assets.kernel_path.as_os_str().as_bytes()).context("kernel_path CString")?;
+    let rootfs_cstr =
+        CString::new(assets.iso_path.as_os_str().as_bytes()).context("rootfs iso CString")?;
+    let config_iso_cstr =
+        CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
+    let vfkit_sock_cstr =
+        CString::new(vfkit_sock_str.as_bytes()).context("vfkit socket CString")?;
+
+    // Create a pipe for serial console input.
+    //
+    // The runner's check() calls wait_with_output(), which immediately closes the
+    // subprocess's stdin (fd 0). On macOS/kqueue, a pipe whose write end is closed
+    // fires EVFILT_READ continuously — causing the serial device to busy-spin at
+    // ~100% CPU. By passing the read end of a fresh pipe instead of fd 0, and
+    // keeping the write end alive until krun_start_enter returns, the serial
+    // device's kevent never fires (no data, write end still open).
+    //
+    // libkrun takes ownership of the read fd via File::from_raw_fd(), so we must
+    // not close it ourselves; only the write end needs cleanup after the VM exits.
+    let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
+    if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+        anyhow::bail!(
+            "Failed to create serial input pipe: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let serial_read_fd = pipe_fds[0];
+    let serial_write_fd = pipe_fds[1];
+
+    unsafe {
+        // FreeBSD requires a serial console; virtio console is not supported.
+        krun_call!(krun_disable_implicit_console(ctx))?;
+        krun_call!(krun_add_serial_console_default(ctx, serial_read_fd, 1))?;
+
+        // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
+        krun_call!(krun_set_kernel(
+            ctx,
+            kernel_cstr.as_ptr(),
+            KRUN_KERNEL_FORMAT_RAW,
+            std::ptr::null(),
+            c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd".as_ptr(),
+        ))?;
+
+        // vtbd0: rootfs ISO (init-freebsd + guest-agent)
+        krun_call!(krun_add_disk(
+            ctx,
+            c"vtbd0".as_ptr(),
+            rootfs_cstr.as_ptr(),
+            true,
+        ))?;
+
+        // vtbd1: config ISO (init-freebsd finds it by KRUN_CONFIG volume label, not vtbd index)
+        krun_call!(krun_add_disk(
+            ctx,
+            c"vtbd1".as_ptr(),
+            config_iso_cstr.as_ptr(),
+            true,
+        ))?;
+
+        // Add virtio-net device with gvproxy backend
+        let mac = random_mac_address();
+        let mut mac_mut = mac;
+        krun_call!(krun_add_net_unixgram(
+            ctx,
+            vfkit_sock_cstr.as_ptr(),
+            -1, // use socket path, not fd
+            mac_mut.as_mut_ptr(),
+            COMPAT_NET_FEATURES,
+            NET_FLAG_VFKIT, // indicates vfkit mode (gvproxy in vfkit compatibility)
+        ))?;
+
+        // Start the VM
+        krun_call!(krun_start_enter(ctx))?;
+    }
+
+    // krun_start_enter returns when the VM exits.
+    // Close the write end of the serial pipe (libkrun already closed the read end).
+    unsafe { libc::close(serial_write_fd) };
+
+    // Clean up gvproxy.
+    let _ = gvproxy_child.kill();
+    let _ = gvproxy_child.wait();
+
+    Ok(())
 }

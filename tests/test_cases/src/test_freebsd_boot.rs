@@ -31,7 +31,7 @@ mod host {
         }
 
         fn should_run(&self) -> ShouldRun {
-            ShouldRun::requires_freebsd_assets("init-freebsd not compiled")
+            ShouldRun::requires_freebsd_assets("prerequisites not met")
         }
     }
 }

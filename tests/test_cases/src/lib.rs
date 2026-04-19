@@ -16,6 +16,12 @@ use test_multiport_console::TestMultiportConsole;
 mod test_freebsd_boot;
 use test_freebsd_boot::TestFreeBsdBoot;
 
+mod test_freebsd_gvproxy_tcp_guest_connect;
+use test_freebsd_gvproxy_tcp_guest_connect::TestFreeBsdGvproxyTcpGuestConnect;
+
+mod test_freebsd_gvproxy_tcp_guest_listen;
+use test_freebsd_gvproxy_tcp_guest_listen::TestFreeBsdGvproxyTcpGuestListen;
+
 pub mod freebsd_guest;
 
 pub enum ShouldRun {
@@ -44,6 +50,17 @@ impl ShouldRun {
             .map(|p| std::path::Path::new(&p).exists())
             .unwrap_or(false);
         if kernel_ok && iso_ok {
+            ShouldRun::Yes
+        } else {
+            ShouldRun::No(reason)
+        }
+    }
+
+    /// Returns Yes if gvproxy binary is available (either via `KRUN_TEST_GVPROXY_PATH` env var
+    /// or found in $PATH), otherwise returns No with the given reason.
+    #[cfg(feature = "host")]
+    pub fn requires_gvproxy(reason: &'static str) -> Self {
+        if common_freebsd::gvproxy_path().is_some() {
             ShouldRun::Yes
         } else {
             ShouldRun::No(reason)
@@ -79,6 +96,14 @@ pub fn test_cases() -> Vec<TestCase> {
         ),
         TestCase::new("multiport-console", Box::new(TestMultiportConsole)),
         TestCase::new("freebsd-boot", Box::new(TestFreeBsdBoot)),
+        TestCase::new(
+            "freebsd-gvproxy-tcp-guest-connect",
+            Box::new(TestFreeBsdGvproxyTcpGuestConnect::new()),
+        ),
+        TestCase::new(
+            "freebsd-gvproxy-tcp-guest-listen",
+            Box::new(TestFreeBsdGvproxyTcpGuestListen::new()),
+        ),
     ]
 }
 
@@ -103,6 +128,9 @@ pub mod common_freebsd;
 #[cfg(feature = "host")]
 mod krun;
 mod tcp_tester;
+
+#[cfg(feature = "guest")]
+pub mod freebsd_network;
 
 #[host]
 #[derive(Clone, Debug)]
