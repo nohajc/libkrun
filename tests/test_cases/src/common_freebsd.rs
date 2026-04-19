@@ -1,6 +1,7 @@
 //! Host-side utilities for FreeBSD guest tests.
 
 use anyhow::Context;
+use nix::libc;
 use std::ffi::CString;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
@@ -128,8 +129,31 @@ fn random_mac_address() -> [u8; 6] {
     ]
 }
 
+/// Return the fixed gvproxy socket paths for a test's tmp directory.
+///
+/// Fixed names (rather than randomised per-run) let the parent process's `check()` know the
+/// paths without any IPC.  Each test already has its own unique `tmp_dir`, so collisions between
+/// concurrent tests are impossible.
+///
+/// The paths are kept short on purpose: macOS `sockaddr_un.sun_path` is 104 bytes including the
+/// null terminator (max 103 usable chars), so unnecessarily long names inside deep tmp directories
+/// overflow the limit.
+pub fn gvproxy_socket_paths(tmp_dir: &Path) -> (String, String) {
+    let net = tmp_dir
+        .join("gvproxy-net.sock")
+        .to_str()
+        .expect("tmp_dir is not valid UTF-8")
+        .to_string();
+    let vfkit = tmp_dir
+        .join("gvproxy-vfkit.sock")
+        .to_str()
+        .expect("tmp_dir is not valid UTF-8")
+        .to_string();
+    (net, vfkit)
+}
+
 /// Start gvproxy process and wait for sockets to be ready.
-fn start_gvproxy(
+pub fn start_gvproxy(
     gvproxy_bin: &Path,
     net_sock_path: &str,
     vfkit_sock_path: &str,
@@ -186,11 +210,28 @@ pub fn setup_kernel_and_enter(
     let config_iso_cstr =
         CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
 
+    // Create a pipe for serial console input to avoid a kqueue busy-spin on macOS.
+    // When the runner's check() calls wait_with_output(), it closes the subprocess's
+    // stdin (fd 0). On macOS/kqueue a closed-write-end pipe fires EVFILT_READ
+    // continuously, spinning the serial device at ~100% CPU.  Using a fresh pipe
+    // whose write end stays open until _exit() is called prevents that.
+    // libkrun takes ownership of the read fd via File::from_raw_fd(); we only
+    // need to keep the write end alive, which _exit() will close for us.
+    let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
+    if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+        anyhow::bail!(
+            "Failed to create serial input pipe: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let serial_read_fd = pipe_fds[0];
+    // pipe_fds[1] (write end) intentionally kept open; _exit() will close it.
+
     unsafe {
         // FreeBSD requires a serial console; virtio console is not supported.
         // The subprocess stdout (fd 1) is piped by the runner — guest serial output appears there.
         krun_call!(krun_disable_implicit_console(ctx))?;
-        krun_call!(krun_add_serial_console_default(ctx, 0, 1))?;
+        krun_call!(krun_add_serial_console_default(ctx, serial_read_fd, 1))?;
 
         // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
         krun_call!(krun_set_kernel(
@@ -232,59 +273,30 @@ pub fn setup_kernel_and_enter_with_gvproxy(
     ctx: u32,
     test_setup: TestSetup,
     assets: FreeBsdAssets,
-    gvproxy_bin: PathBuf,
 ) -> anyhow::Result<()> {
     let config_iso = create_config_iso(&test_setup.test_case, &test_setup.tmp_dir)?;
 
-    // Create unique socket paths for this test.
-    // Use 8 hex digits (lower 32 bits of nanoseconds) to keep paths short.
-    // macOS sockaddr_un.sun_path is 104 bytes including the null terminator (max 103
-    // chars), so long filenames inside deep test subdirectories overflow the limit.
-    let rand_id = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let short_id = format!("{:08x}", rand_id & 0xFFFF_FFFF);
-    let net_sock_path = test_setup
-        .tmp_dir
-        .join(format!("gvproxy-net-{}.sock", short_id));
-    let vfkit_sock_path = test_setup
-        .tmp_dir
-        .join(format!("gvproxy-vfkit-{}.sock", short_id));
+    // Socket paths are fixed (not randomised) so that check() — which runs in the
+    // parent/runner process — can derive them from tmp_dir without any IPC.
+    // gvproxy is started by check() in the runner process; see the note on cleanup below.
+    //
+    // Why gvproxy is NOT started here:
+    //   krun_start_enter() terminates the subprocess via libc::_exit(), which bypasses
+    //   all Rust destructors and atexit handlers.  Any Child handle created here would
+    //   be leaked; gvproxy would keep running as an orphan.  Running gvproxy in the
+    //   parent (runner) process and cleaning it up in check() is the correct pattern.
+    let (_net_sock_str, vfkit_sock_str) = gvproxy_socket_paths(&test_setup.tmp_dir);
+    let vfkit_sock_cstr =
+        CString::new(vfkit_sock_str.as_bytes()).context("vfkit socket CString")?;
 
-    let net_sock_str = net_sock_path
-        .to_str()
-        .context("net socket path not UTF-8")?
-        .to_string();
-    let vfkit_sock_str = vfkit_sock_path
-        .to_str()
-        .context("vfkit socket path not UTF-8")?
-        .to_string();
-
-    // Start gvproxy
-    let mut gvproxy_child = start_gvproxy(&gvproxy_bin, &net_sock_str, &vfkit_sock_str)?;
-
-    // Setup kernel (similar to non-gvproxy variant)
     let kernel_cstr =
         CString::new(assets.kernel_path.as_os_str().as_bytes()).context("kernel_path CString")?;
     let rootfs_cstr =
         CString::new(assets.iso_path.as_os_str().as_bytes()).context("rootfs iso CString")?;
     let config_iso_cstr =
         CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
-    let vfkit_sock_cstr =
-        CString::new(vfkit_sock_str.as_bytes()).context("vfkit socket CString")?;
 
-    // Create a pipe for serial console input.
-    //
-    // The runner's check() calls wait_with_output(), which immediately closes the
-    // subprocess's stdin (fd 0). On macOS/kqueue, a pipe whose write end is closed
-    // fires EVFILT_READ continuously — causing the serial device to busy-spin at
-    // ~100% CPU. By passing the read end of a fresh pipe instead of fd 0, and
-    // keeping the write end alive until krun_start_enter returns, the serial
-    // device's kevent never fires (no data, write end still open).
-    //
-    // libkrun takes ownership of the read fd via File::from_raw_fd(), so we must
-    // not close it ourselves; only the write end needs cleanup after the VM exits.
+    // Serial input pipe — see setup_kernel_and_enter for rationale.
     let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
     if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
         anyhow::bail!(
@@ -293,7 +305,7 @@ pub fn setup_kernel_and_enter_with_gvproxy(
         );
     }
     let serial_read_fd = pipe_fds[0];
-    let serial_write_fd = pipe_fds[1];
+    // pipe_fds[1] (write end) intentionally kept open; _exit() will close it.
 
     unsafe {
         // FreeBSD requires a serial console; virtio console is not supported.
@@ -325,7 +337,9 @@ pub fn setup_kernel_and_enter_with_gvproxy(
             true,
         ))?;
 
-        // Add virtio-net device with gvproxy backend
+        // Add virtio-net device with gvproxy backend.
+        // gvproxy is started by check() in the parent process; it will be listening on
+        // vfkit_sock_str before krun_start_enter() actually needs the socket.
         let mac = random_mac_address();
         let mut mac_mut = mac;
         krun_call!(krun_add_net_unixgram(
@@ -337,17 +351,7 @@ pub fn setup_kernel_and_enter_with_gvproxy(
             NET_FLAG_VFKIT, // indicates vfkit mode (gvproxy in vfkit compatibility)
         ))?;
 
-        // Start the VM
         krun_call!(krun_start_enter(ctx))?;
     }
-
-    // krun_start_enter returns when the VM exits.
-    // Close the write end of the serial pipe (libkrun already closed the read end).
-    unsafe { libc::close(serial_write_fd) };
-
-    // Clean up gvproxy.
-    let _ = gvproxy_child.kill();
-    let _ = gvproxy_child.wait();
-
-    Ok(())
+    unreachable!()
 }

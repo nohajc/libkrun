@@ -145,8 +145,12 @@ pub trait Test {
     /// Start the VM
     fn start_vm(self: Box<Self>, test_setup: TestSetup) -> anyhow::Result<()>;
 
-    /// Checks the output of the (host) process which started the VM
-    fn check(self: Box<Self>, child: Child) {
+    /// Checks the output of the (host) process which started the VM.
+    ///
+    /// Receives `test_setup` so that implementations can access `tmp_dir` for
+    /// host-side resources (e.g. gvproxy socket paths) that must be managed from
+    /// the runner process rather than the VM subprocess.
+    fn check(self: Box<Self>, child: Child, _test_setup: TestSetup) {
         let output = child.wait_with_output().unwrap();
         assert_eq!(String::from_utf8(output.stdout).unwrap(), "OK\n");
     }

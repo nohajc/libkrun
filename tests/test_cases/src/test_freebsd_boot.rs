@@ -13,7 +13,7 @@ mod host {
     use krun_sys::*;
 
     impl Test for TestFreeBsdBoot {
-        fn check(self: Box<Self>, child: Child) {
+        fn check(self: Box<Self>, child: Child, _test_setup: TestSetup) {
             let output = child.wait_with_output().unwrap();
             let stdout = normalize_serial_output(output.stdout);
             assert_eq!(stdout, "OK\n");
