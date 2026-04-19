@@ -6,7 +6,7 @@ use std::ffi::CString;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{krun_call, TestSetup};
@@ -152,6 +152,56 @@ pub fn gvproxy_socket_paths(tmp_dir: &Path) -> (String, String) {
     (net, vfkit)
 }
 
+/// Set up a gvproxy port-forwarding rule via its HTTP API.
+///
+/// Sends `POST /services/forwarder/expose` with
+/// `{"local":":<port>","remote":"<remote_ip>:<port>"}` to the net unix socket.
+/// Retries until gvproxy is accepting connections (up to ~10 s).
+pub fn setup_gvproxy_port_forward(
+    net_sock_path: &str,
+    port: u16,
+    remote_ip: std::net::Ipv4Addr,
+) -> anyhow::Result<()> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    // Wait until gvproxy is ready to serve HTTP.
+    let mut stream = None;
+    for _ in 0..100 {
+        match UnixStream::connect(net_sock_path) {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+    let mut stream = stream
+        .ok_or_else(|| anyhow::anyhow!("gvproxy HTTP socket not ready: {}", net_sock_path))?;
+
+    let body = format!(r#"{{"local":":{port}","remote":"{remote_ip}:{port}"}}"#);
+    let request = format!(
+        "POST /services/forwarder/expose HTTP/1.0\r\nHost: unix\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body,
+    );
+
+    stream
+        .write_all(request.as_bytes())
+        .context("write port-forward request")?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .context("read port-forward response")?;
+
+    if !response.contains("200") {
+        anyhow::bail!("gvproxy port-forward expose failed: {}", response);
+    }
+
+    Ok(())
+}
+
 /// Start gvproxy process and wait for sockets to be ready.
 pub fn start_gvproxy(
     gvproxy_bin: &Path,
@@ -172,7 +222,11 @@ pub fn start_gvproxy(
         "-1",
     ]);
 
-    let child = cmd.spawn().context("Failed to start gvproxy")?;
+    let child = cmd
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Failed to start gvproxy")?;
 
     // Wait for vfkit socket to be created (indicates gvproxy is ready)
     let mut attempts = 0;

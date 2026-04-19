@@ -3,9 +3,10 @@ use macros::{guest, host};
 use std::net::Ipv4Addr;
 
 const PORT: u16 = 8000;
-// For "guest connects to host" the guest must connect to the gvproxy gateway IP,
-// not to its own IP (192.168.127.2).
-const HOST_GW_IP: Ipv4Addr = Ipv4Addr::new(192, 168, 127, 1);
+// gvproxy's default NAT table maps HostIP (192.168.127.254) → 127.0.0.1 on the host.
+// The gateway IP (192.168.127.1) is only virtual inside gvproxy's netstack and NOT
+// reachable via net.Dial from the host — connecting to it gets a TCP RST.
+const HOST_IP: Ipv4Addr = Ipv4Addr::new(192, 168, 127, 254);
 
 pub struct TestFreeBsdGvproxyTcpGuestConnect {
     tcp_tester: TcpTester,
@@ -14,7 +15,7 @@ pub struct TestFreeBsdGvproxyTcpGuestConnect {
 impl TestFreeBsdGvproxyTcpGuestConnect {
     pub fn new() -> TestFreeBsdGvproxyTcpGuestConnect {
         Self {
-            tcp_tester: TcpTester::new_with_ip(PORT, HOST_GW_IP),
+            tcp_tester: TcpTester::new_with_ip(PORT, HOST_IP),
         }
     }
 }
