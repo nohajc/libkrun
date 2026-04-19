@@ -55,6 +55,8 @@ export KRUN_TEST_GUEST_AGENT_PATH="target/$GUEST_TARGET/debug/guest-agent"
 FREEBSD_SYSROOT="../freebsd-sysroot"
 FREEBSD_INIT="../init/init-freebsd"
 
+RUST_NIGHTLY="nightly-2026-01-25"
+
 # Download FreeBSD kernel if KRUN_TEST_FREEBSD_KERNEL_PATH is not already set.
 # The kernel binary is cached in target/freebsd-kernel/ and reused on subsequent runs.
 if [ -z "${KRUN_TEST_FREEBSD_KERNEL_PATH}" ]; then
@@ -105,7 +107,7 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 		FREEBSD_RUSTFLAGS="-C link-arg=-target -C link-arg=aarch64-unknown-freebsd ${FREEBSD_RUSTFLAGS_BASE}"
 		[ "$OS" = "Darwin" ] && FREEBSD_RUSTFLAGS="${FREEBSD_RUSTFLAGS} -C link-arg=-stdlib=libc++"
 		export CARGO_TARGET_AARCH64_UNKNOWN_FREEBSD_RUSTFLAGS="${FREEBSD_RUSTFLAGS}"
-		FREEBSD_CARGO_CMD="cargo +nightly-2026-01-25 build -Z build-std=std,panic_abort --target=${FREEBSD_TARGET} -p guest-agent"
+		FREEBSD_CARGO_CMD="cargo +${RUST_NIGHTLY} build -Z build-std=std,panic_abort --target=${FREEBSD_TARGET} -p guest-agent"
 	fi
 
 	echo "Cross-compiling guest-agent for ${FREEBSD_TARGET}"
@@ -127,7 +129,7 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 			echo "(Run: rustup target add ${FREEBSD_TARGET})"
 		else
 			echo "WARNING: guest-agent build for ${FREEBSD_TARGET} failed; FreeBSD tests will be skipped."
-			echo "(Run: rustup toolchain install nightly-2026-01-25)"
+			echo "(Run: rustup toolchain install ${RUST_NIGHTLY})"
 		fi
 	fi
 else

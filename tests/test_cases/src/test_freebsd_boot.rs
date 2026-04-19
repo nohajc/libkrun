@@ -31,7 +31,10 @@ mod host {
         }
 
         fn should_run(&self) -> ShouldRun {
-            ShouldRun::requires_freebsd_assets("prerequisites not met")
+            match freebsd_assets() {
+                Some(_) => ShouldRun::Yes,
+                None => ShouldRun::No("prerequisites not met"),
+            }
         }
     }
 }

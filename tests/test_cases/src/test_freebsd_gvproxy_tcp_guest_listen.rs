@@ -39,13 +39,10 @@ mod host {
 
     impl Test for TestFreeBsdGvproxyTcpGuestListen {
         fn should_run(&self) -> ShouldRun {
-            if freebsd_assets().is_none() {
-                return ShouldRun::No("prerequisites not met");
+            match (freebsd_assets(), gvproxy_path()) {
+                (Some(_), Some(_)) => ShouldRun::Yes,
+                _ => ShouldRun::No("prerequisites not met"),
             }
-            if gvproxy_path().is_none() {
-                return ShouldRun::No("gvproxy not available");
-            }
-            ShouldRun::Yes
         }
 
         fn start_vm(self: Box<Self>, test_setup: TestSetup) -> anyhow::Result<()> {

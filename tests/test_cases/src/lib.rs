@@ -38,34 +38,6 @@ impl ShouldRun {
             ShouldRun::Yes
         }
     }
-
-    /// Returns Yes if both `KRUN_TEST_FREEBSD_KERNEL_PATH` and `KRUN_TEST_FREEBSD_ISO_PATH`
-    /// are set and point to existing files, otherwise returns No with the given reason.
-    #[cfg(feature = "host")]
-    pub fn requires_freebsd_assets(reason: &'static str) -> Self {
-        let kernel_ok = std::env::var_os("KRUN_TEST_FREEBSD_KERNEL_PATH")
-            .map(|p| std::path::Path::new(&p).exists())
-            .unwrap_or(false);
-        let iso_ok = std::env::var_os("KRUN_TEST_FREEBSD_ISO_PATH")
-            .map(|p| std::path::Path::new(&p).exists())
-            .unwrap_or(false);
-        if kernel_ok && iso_ok {
-            ShouldRun::Yes
-        } else {
-            ShouldRun::No(reason)
-        }
-    }
-
-    /// Returns Yes if gvproxy binary is available (either via `KRUN_TEST_GVPROXY_PATH` env var
-    /// or found in $PATH), otherwise returns No with the given reason.
-    #[cfg(feature = "host")]
-    pub fn requires_gvproxy(reason: &'static str) -> Self {
-        if common_freebsd::gvproxy_path().is_some() {
-            ShouldRun::Yes
-        } else {
-            ShouldRun::No(reason)
-        }
-    }
 }
 
 pub fn test_cases() -> Vec<TestCase> {

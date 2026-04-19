@@ -31,7 +31,8 @@ pub fn freebsd_assets() -> Option<FreeBsdAssets> {
     })
 }
 
-/// Find gvproxy binary path from environment or search $PATH.
+/// Read gvproxy binary path from environment variable.
+/// Returns `None` if the variable is unset or the referenced file doesn't exist.
 pub fn gvproxy_path() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("KRUN_TEST_GVPROXY_PATH") {
         let p = PathBuf::from(&path);
@@ -111,12 +112,7 @@ fn random_mac_address() -> [u8; 6] {
     ]
 }
 
-/// Return the fixed gvproxy socket paths for a test's tmp directory.
-///
-/// Fixed names (rather than randomised per-run) let the parent process's `check()` know the
-/// paths without any IPC.  Each test already has its own unique `tmp_dir`, so collisions between
-/// concurrent tests are impossible.
-///
+/// Return the gvproxy socket paths for a test's tmp directory.
 /// The paths are kept short on purpose: macOS `sockaddr_un.sun_path` is 104 bytes including the
 /// null terminator (max 103 usable chars), so unnecessarily long names inside deep tmp directories
 /// overflow the limit.
@@ -202,11 +198,10 @@ pub fn start_gvproxy(
         "--listen-vfkit",
         &format!("unixgram://{}", vfkit_sock_path),
         "--ssh-port",
-        "-1",
+        "-1", // by default, gvproxy binds to port 22 for SSH forwarding; -1 disables that
     ]);
 
-    // Redirect gvproxy stdout/stderr to a log file inside the test tmp dir so
-    // test runners can inspect gvproxy output when debugging.
+    // Redirect gvproxy stdout/stderr to a log file inside the test tmp dir
     let log_path = tmp_dir.join("gvproxy_log.txt");
     let log_file = std::fs::OpenOptions::new()
         .create(true)
@@ -252,64 +247,15 @@ pub fn setup_kernel_and_enter(
 ) -> anyhow::Result<()> {
     let config_iso = create_config_iso(&test_setup.test_case, &test_setup.tmp_dir)?;
 
-    let kernel_cstr =
-        CString::new(assets.kernel_path.as_os_str().as_bytes()).context("kernel_path CString")?;
-    let rootfs_cstr =
-        CString::new(assets.iso_path.as_os_str().as_bytes()).context("rootfs iso CString")?;
-    let config_iso_cstr =
-        CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
-
-    // Create a pipe for serial console input to avoid a kqueue busy-spin on macOS.
-    // When the runner's check() calls wait_with_output(), it closes the subprocess's
-    // stdin (fd 0). On macOS/kqueue a closed-write-end pipe fires EVFILT_READ
-    // continuously, spinning the serial device at ~100% CPU.  Using a fresh pipe
-    // whose write end stays open until _exit() is called prevents that.
-    // libkrun takes ownership of the read fd via File::from_raw_fd(); we only
-    // need to keep the write end alive, which _exit() will close for us.
-    let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
-    if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
-        anyhow::bail!(
-            "Failed to create serial input pipe: {}",
-            std::io::Error::last_os_error()
-        );
-    }
-    let serial_read_fd = pipe_fds[0];
-    // pipe_fds[1] (write end) intentionally kept open; _exit() will close it.
-
     unsafe {
-        // FreeBSD requires a serial console; virtio console is not supported.
-        // The subprocess stdout (fd 1) is piped by the runner — guest serial output appears there.
-        krun_call!(krun_disable_implicit_console(ctx))?;
-        krun_call!(krun_add_serial_console_default(ctx, serial_read_fd, 1))?;
-
-        // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
-        krun_call!(krun_set_kernel(
+        do_setup_and_enter(
             ctx,
-            kernel_cstr.as_ptr(),
-            KRUN_KERNEL_FORMAT_RAW,
-            std::ptr::null(),
-            c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd".as_ptr(),
-        ))?;
-
-        // vtbd0: rootfs ISO (init-freebsd + guest-agent)
-        krun_call!(krun_add_disk(
-            ctx,
-            c"vtbd0".as_ptr(),
-            rootfs_cstr.as_ptr(),
-            true,
-        ))?;
-
-        // vtbd1: config ISO (init-freebsd finds it by KRUN_CONFIG volume label, not vtbd index)
-        krun_call!(krun_add_disk(
-            ctx,
-            c"vtbd1".as_ptr(),
-            config_iso_cstr.as_ptr(),
-            true,
-        ))?;
-
-        krun_call!(krun_start_enter(ctx))?;
+            &assets.kernel_path,
+            &assets.iso_path,
+            &config_iso,
+            None,
+        )
     }
-    unreachable!()
 }
 
 /// Boot a FreeBSD guest with gvproxy networking enabled.
@@ -325,82 +271,96 @@ pub fn setup_kernel_and_enter_with_gvproxy(
 ) -> anyhow::Result<()> {
     let config_iso = create_config_iso(&test_setup.test_case, &test_setup.tmp_dir)?;
 
-    // Socket paths are fixed (not randomised) so that check() — which runs in the
-    // parent/runner process — can derive them from tmp_dir without any IPC.
-    // gvproxy is started by check() in the runner process; see the note on cleanup below.
-    //
-    // Why gvproxy is NOT started here:
-    //   krun_start_enter() terminates the subprocess via libc::_exit(), which bypasses
-    //   all Rust destructors and atexit handlers.  Any Child handle created here would
-    //   be leaked; gvproxy would keep running as an orphan.  Running gvproxy in the
-    //   parent (runner) process and cleaning it up in check() is the correct pattern.
-    let (_net_sock_str, vfkit_sock_str) = gvproxy_socket_paths(&test_setup.tmp_dir);
-    let vfkit_sock_cstr =
-        CString::new(vfkit_sock_str.as_bytes()).context("vfkit socket CString")?;
+    let (_, vfkit_sock) = gvproxy_socket_paths(&test_setup.tmp_dir);
 
-    let kernel_cstr =
-        CString::new(assets.kernel_path.as_os_str().as_bytes()).context("kernel_path CString")?;
-    let rootfs_cstr =
-        CString::new(assets.iso_path.as_os_str().as_bytes()).context("rootfs iso CString")?;
-    let config_iso_cstr =
-        CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
+    unsafe {
+        do_setup_and_enter(
+            ctx,
+            &assets.kernel_path,
+            &assets.iso_path,
+            &config_iso,
+            Some(&vfkit_sock),
+        )
+    }
+}
 
-    // Serial input pipe — see setup_kernel_and_enter for rationale.
+/// Shared implementation for entering the guest.  Handles serial pipe + krun calls
+/// and optionally configures a vfkit-backed virtio-net device when `vfkit_sock`
+/// is `Some`.
+unsafe fn do_setup_and_enter(
+    ctx: u32,
+    kernel_path: &Path,
+    rootfs_path: &Path,
+    config_iso: &Path,
+    vfkit_sock: Option<&str>,
+) -> anyhow::Result<()> {
+    // Create a pipe for serial console input to avoid a kqueue busy-spin on macOS.
+    // When the runner's check() calls wait_with_output(), it closes the subprocess's
+    // stdin (fd 0). On macOS/kqueue a closed-write-end pipe fires EVFILT_READ
+    // continuously, spinning the serial device at ~100% CPU.  Using a fresh pipe
+    // whose write end stays open until _exit() is called prevents that.
+    // libkrun takes ownership of the read fd via File::from_raw_fd(); we only
+    // need to keep the write end alive, which _exit() will close for us.
     let mut pipe_fds: [libc::c_int; 2] = [-1, -1];
-    if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+    if libc::pipe(pipe_fds.as_mut_ptr()) != 0 {
         anyhow::bail!(
             "Failed to create serial input pipe: {}",
             std::io::Error::last_os_error()
         );
     }
     let serial_read_fd = pipe_fds[0];
-    // pipe_fds[1] (write end) intentionally kept open; _exit() will close it.
 
-    unsafe {
-        // FreeBSD requires a serial console; virtio console is not supported.
-        krun_call!(krun_disable_implicit_console(ctx))?;
-        krun_call!(krun_add_serial_console_default(ctx, serial_read_fd, 1))?;
+    // Build CStrings for krun API.
+    let kernel_cstr =
+        CString::new(kernel_path.as_os_str().as_bytes()).context("kernel_path CString")?;
+    let rootfs_cstr =
+        CString::new(rootfs_path.as_os_str().as_bytes()).context("rootfs iso CString")?;
+    let config_iso_cstr =
+        CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
 
-        // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
-        krun_call!(krun_set_kernel(
-            ctx,
-            kernel_cstr.as_ptr(),
-            KRUN_KERNEL_FORMAT_RAW,
-            std::ptr::null(),
-            c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd".as_ptr(),
-        ))?;
+    // FreeBSD requires a serial console; virtio console is not supported.
+    krun_call!(krun_disable_implicit_console(ctx))?;
+    krun_call!(krun_add_serial_console_default(ctx, serial_read_fd, 1))?;
 
-        // vtbd0: rootfs ISO (init-freebsd + guest-agent)
-        krun_call!(krun_add_disk(
-            ctx,
-            c"vtbd0".as_ptr(),
-            rootfs_cstr.as_ptr(),
-            true,
-        ))?;
+    // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
+    krun_call!(krun_set_kernel(
+        ctx,
+        kernel_cstr.as_ptr(),
+        KRUN_KERNEL_FORMAT_RAW,
+        std::ptr::null(),
+        c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd".as_ptr(),
+    ))?;
 
-        // vtbd1: config ISO (init-freebsd finds it by KRUN_CONFIG volume label, not vtbd index)
-        krun_call!(krun_add_disk(
-            ctx,
-            c"vtbd1".as_ptr(),
-            config_iso_cstr.as_ptr(),
-            true,
-        ))?;
+    // vtbd0: rootfs ISO (init-freebsd + guest-agent)
+    krun_call!(krun_add_disk(
+        ctx,
+        c"vtbd0".as_ptr(),
+        rootfs_cstr.as_ptr(),
+        true,
+    ))?;
 
-        // Add virtio-net device with gvproxy backend.
-        // gvproxy is started by check() in the parent process; it will be listening on
-        // vfkit_sock_str before krun_start_enter() actually needs the socket.
+    // vtbd1: config ISO (init-freebsd finds it by KRUN_CONFIG volume label, not vtbd index)
+    krun_call!(krun_add_disk(
+        ctx,
+        c"vtbd1".as_ptr(),
+        config_iso_cstr.as_ptr(),
+        true,
+    ))?;
+
+    if let Some(vfkit_path) = vfkit_sock {
+        let vfkit_cstr = CString::new(vfkit_path.as_bytes()).context("vfkit socket CString")?;
         let mac = random_mac_address();
         let mut mac_mut = mac;
         krun_call!(krun_add_net_unixgram(
             ctx,
-            vfkit_sock_cstr.as_ptr(),
+            vfkit_cstr.as_ptr(),
             -1, // use socket path, not fd
             mac_mut.as_mut_ptr(),
             COMPAT_NET_FEATURES,
-            NET_FLAG_VFKIT, // indicates vfkit mode (gvproxy in vfkit compatibility)
+            NET_FLAG_VFKIT,
         ))?;
-
-        krun_call!(krun_start_enter(ctx))?;
     }
+
+    krun_call!(krun_start_enter(ctx))?;
     unreachable!()
 }
