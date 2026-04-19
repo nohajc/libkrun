@@ -9,7 +9,7 @@ mod host {
     use std::process::Child;
 
     use crate::common_freebsd::{freebsd_assets, normalize_serial_output, setup_kernel_and_enter};
-    use crate::{krun_call_u32, ShouldRun, Test, TestSetup};
+    use crate::{krun_call, krun_call_u32, ShouldRun, Test, TestSetup};
     use krun_sys::*;
 
     impl Test for TestFreeBsdBoot {
@@ -22,7 +22,9 @@ mod host {
         fn start_vm(self: Box<Self>, test_setup: TestSetup) -> anyhow::Result<()> {
             let assets = freebsd_assets().expect("FreeBSD assets must be present when test runs");
             unsafe {
+                krun_call!(krun_set_log_level(KRUN_LOG_LEVEL_TRACE))?;
                 let ctx = krun_call_u32!(krun_create_ctx())?;
+                krun_call!(krun_set_vm_config(ctx, 1, 512))?;
                 setup_kernel_and_enter(ctx, test_setup, assets)?;
             }
             Ok(())
