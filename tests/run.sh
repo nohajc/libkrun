@@ -129,7 +129,7 @@ if [ -f "${FREEBSD_SYSROOT}/.sysroot_ready" ] && [ -f "${FREEBSD_INIT}" ]; then
 			echo "(Run: rustup target add ${FREEBSD_TARGET})"
 		else
 			echo "WARNING: guest-agent build for ${FREEBSD_TARGET} failed; FreeBSD tests will be skipped."
-			echo "(Run: rustup toolchain install ${RUST_NIGHTLY})"
+			echo "(Run: rustup +${RUST_NIGHTLY} component add rust-src)"
 		fi
 	fi
 else
