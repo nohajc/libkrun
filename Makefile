@@ -191,7 +191,7 @@ $(FREEBSD_ROOTFS_DIR)/.sysroot_ready: $(FREEBSD_BASE_TXZ)
 	@cd $(FREEBSD_ROOTFS_DIR) && tar xJf base.txz 2>/dev/null || true
 	@touch $@
 
-BSD_ARCH=$(subst x86_64,amd64,$(ARCH))
+BSD_ARCH=$(subst x86_64,amd64,$(subst aarch64,arm64,$(ARCH)))
 
 $(FREEBSD_BASE_TXZ):
 	@echo "Downloading FreeBSD $(FREEBSD_VERSION) base for $(BSD_ARCH)..."
