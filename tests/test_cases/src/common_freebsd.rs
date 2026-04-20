@@ -323,10 +323,14 @@ unsafe fn do_setup_and_enter(
     krun_call!(krun_add_serial_console_default(ctx, serial_read_fd, 1))?;
 
     // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
+    #[cfg(target_arch = "x86_64")]
+    let kernel_format = KRUN_KERNEL_FORMAT_ELF;
+    #[cfg(not(target_arch = "x86_64"))]
+    let kernel_format = KRUN_KERNEL_FORMAT_RAW;
     krun_call!(krun_set_kernel(
         ctx,
         kernel_cstr.as_ptr(),
-        KRUN_KERNEL_FORMAT_RAW,
+        kernel_format,
         std::ptr::null(),
         c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd".as_ptr(),
     ))?;
