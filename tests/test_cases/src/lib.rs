@@ -13,6 +13,17 @@ use test_tsi_tcp_guest_listen::TestTsiTcpGuestListen;
 mod test_multiport_console;
 use test_multiport_console::TestMultiportConsole;
 
+mod test_freebsd_boot;
+use test_freebsd_boot::TestFreeBsdBoot;
+
+mod test_freebsd_gvproxy_tcp_guest_connect;
+use test_freebsd_gvproxy_tcp_guest_connect::TestFreeBsdGvproxyTcpGuestConnect;
+
+mod test_freebsd_gvproxy_tcp_guest_listen;
+use test_freebsd_gvproxy_tcp_guest_listen::TestFreeBsdGvproxyTcpGuestListen;
+
+pub mod freebsd_guest;
+
 pub enum ShouldRun {
     Yes,
     No(&'static str),
@@ -56,6 +67,15 @@ pub fn test_cases() -> Vec<TestCase> {
             Box::new(TestTsiTcpGuestListen::new()),
         ),
         TestCase::new("multiport-console", Box::new(TestMultiportConsole)),
+        TestCase::new("freebsd-boot", Box::new(TestFreeBsdBoot)),
+        TestCase::new(
+            "freebsd-gvproxy-tcp-guest-connect",
+            Box::new(TestFreeBsdGvproxyTcpGuestConnect::new()),
+        ),
+        TestCase::new(
+            "freebsd-gvproxy-tcp-guest-listen",
+            Box::new(TestFreeBsdGvproxyTcpGuestListen::new()),
+        ),
     ]
 }
 
@@ -75,8 +95,14 @@ compile_error!("Cannot enable both guest and host in the same binary!");
 mod common;
 
 #[cfg(feature = "host")]
+pub mod common_freebsd;
+
+#[cfg(feature = "host")]
 mod krun;
 mod tcp_tester;
+
+#[cfg(feature = "guest")]
+pub mod freebsd_network;
 
 #[host]
 #[derive(Clone, Debug)]
@@ -91,8 +117,12 @@ pub trait Test {
     /// Start the VM
     fn start_vm(self: Box<Self>, test_setup: TestSetup) -> anyhow::Result<()>;
 
-    /// Checks the output of the (host) process which started the VM
-    fn check(self: Box<Self>, child: Child) {
+    /// Checks the output of the (host) process which started the VM.
+    ///
+    /// Receives `test_setup` so that implementations can access `tmp_dir` for
+    /// host-side resources (e.g. gvproxy socket paths) that must be managed from
+    /// the runner process rather than the VM subprocess.
+    fn check(self: Box<Self>, child: Child, _test_setup: TestSetup) {
         let output = child.wait_with_output().unwrap();
         assert_eq!(String::from_utf8(output.stdout).unwrap(), "OK\n");
     }
