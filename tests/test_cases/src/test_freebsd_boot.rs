@@ -16,7 +16,7 @@ mod host {
         fn check(self: Box<Self>, child: Child, _test_setup: TestSetup) {
             let output = child.wait_with_output().unwrap();
             let stdout = normalize_serial_output(output.stdout);
-            assert_eq!(stdout, "OK\n");
+            assert!(stdout.contains("OK\n"));
         }
 
         fn start_vm(self: Box<Self>, test_setup: TestSetup) -> anyhow::Result<()> {

@@ -60,26 +60,34 @@ RUST_NIGHTLY="nightly-2026-01-25"
 # Download FreeBSD kernel if KRUN_TEST_FREEBSD_KERNEL_PATH is not already set.
 # The kernel binary is cached in target/freebsd-kernel/ and reused on subsequent runs.
 if [ -z "${KRUN_TEST_FREEBSD_KERNEL_PATH}" ]; then
+	FREEBSD_KERNEL_DIR="target/freebsd-kernel"
+	mkdir -p "${FREEBSD_KERNEL_DIR}"
+
 	if [ "$ARCH" = "x86_64" ]; then
-		FREEBSD_KERNEL_URL="https://download.freebsd.org/releases/amd64/14.4-RELEASE/kernel.txz"
-		FREEBSD_KERNEL_BIN="kernel"
+		# Use Firecracker-optimized FreeBSD kernel for x86_64
+		FREEBSD_KERNEL_URL="https://github.com/acj/freebsd-firecracker/releases/download/v0.8.1/freebsd-kern.bin"
+		FREEBSD_KERNEL_PATH="${FREEBSD_KERNEL_DIR}/freebsd-kern.bin"
 	else
+		# Use upstream FreeBSD kernel for aarch64
 		FREEBSD_KERNEL_URL="https://download.freebsd.org/releases/arm64/aarch64/14.4-RELEASE/kernel.txz"
 		FREEBSD_KERNEL_BIN="kernel.bin"
+		FREEBSD_KERNEL_PATH="${FREEBSD_KERNEL_DIR}/boot/kernel/${FREEBSD_KERNEL_BIN}"
 	fi
-	FREEBSD_KERNEL_DIR="target/freebsd-kernel"
-	FREEBSD_KERNEL_PATH="${FREEBSD_KERNEL_DIR}/boot/kernel/${FREEBSD_KERNEL_BIN}"
+
 	if [ ! -f "${FREEBSD_KERNEL_PATH}" ]; then
-		echo "Downloading FreeBSD 14.4-RELEASE kernel..."
-		mkdir -p "${FREEBSD_KERNEL_DIR}"
-		FREEBSD_KERNEL_TXZ=$(mktemp)
-		if curl -fL -o "${FREEBSD_KERNEL_TXZ}" "${FREEBSD_KERNEL_URL}"; then
-			tar xJf "${FREEBSD_KERNEL_TXZ}" -C "${FREEBSD_KERNEL_DIR}" \
-				"./boot/kernel/${FREEBSD_KERNEL_BIN}"
-			rm -f "${FREEBSD_KERNEL_TXZ}"
+		echo "Downloading FreeBSD kernel..."
+		FREEBSD_KERNEL_TMP=$(mktemp)
+		if curl -fL -o "${FREEBSD_KERNEL_TMP}" "${FREEBSD_KERNEL_URL}"; then
+			if [ "$ARCH" = "x86_64" ]; then
+				mv "${FREEBSD_KERNEL_TMP}" "${FREEBSD_KERNEL_PATH}"
+			else
+				tar xJf "${FREEBSD_KERNEL_TMP}" -C "${FREEBSD_KERNEL_DIR}" \
+					"./boot/kernel/${FREEBSD_KERNEL_BIN}"
+				rm -f "${FREEBSD_KERNEL_TMP}"
+			fi
 		else
 			echo "WARNING: Failed to download FreeBSD kernel; FreeBSD tests will be skipped."
-			rm -f "${FREEBSD_KERNEL_TXZ}"
+			rm -f "${FREEBSD_KERNEL_TMP}"
 		fi
 	fi
 	if [ -f "${FREEBSD_KERNEL_PATH}" ]; then

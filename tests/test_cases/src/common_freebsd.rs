@@ -324,15 +324,16 @@ unsafe fn do_setup_and_enter(
 
     // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
     #[cfg(target_arch = "x86_64")]
-    let kernel_format = KRUN_KERNEL_FORMAT_ELF;
+    let (kernel_format, cmdline) = (KRUN_KERNEL_FORMAT_ELF, c"vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd");
     #[cfg(not(target_arch = "x86_64"))]
-    let kernel_format = KRUN_KERNEL_FORMAT_RAW;
+    let (kernel_format, cmdline) = (KRUN_KERNEL_FORMAT_RAW, c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd");
+
     krun_call!(krun_set_kernel(
         ctx,
         kernel_cstr.as_ptr(),
         kernel_format,
         std::ptr::null(),
-        c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd".as_ptr(),
+        cmdline.as_ptr(),
     ))?;
 
     // vtbd0: rootfs ISO (init-freebsd + guest-agent)
