@@ -1,5 +1,5 @@
 name: Cross-compilation
-on: [pull_request]
+on: [pull_request, push]
 
 jobs:
   cross-compile-macos:
@@ -38,4 +38,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends lld
 
       - name: Build FreeBSD init on Linux
+        run: make BUILD_BSD_INIT=1 -- init/init-freebsd
+
+  cross-compile-linux-aarch64:
+    name: Cross-compilation (Linux aarch64 -> FreeBSD)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lld
+
+      - name: Build FreeBSD init on Linux aarch64
         run: make BUILD_BSD_INIT=1 -- init/init-freebsd
