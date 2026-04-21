@@ -311,10 +311,8 @@ unsafe fn do_setup_and_enter(
     let serial_read_fd = pipe_fds[0];
 
     // Build CStrings for krun API.
-    let kernel_cstr =
-        CString::new(kernel_path.as_os_str().as_bytes()).context("CString::new")?;
-    let rootfs_cstr =
-        CString::new(rootfs_path.as_os_str().as_bytes()).context("CString::new")?;
+    let kernel_cstr = CString::new(kernel_path.as_os_str().as_bytes()).context("CString::new")?;
+    let rootfs_cstr = CString::new(rootfs_path.as_os_str().as_bytes()).context("CString::new")?;
     let config_iso_cstr =
         CString::new(config_iso.as_os_str().as_bytes()).context("CString::new")?;
 
@@ -324,11 +322,13 @@ unsafe fn do_setup_and_enter(
 
     // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
     #[cfg(target_arch = "x86_64")]
-    let (kernel_format, cmdline_prefix) = (KRUN_KERNEL_FORMAT_ELF, "");
+    let (kernel_format, cmdline_prefix, flags) = (KRUN_KERNEL_FORMAT_ELF, "", "boot_mute=YES");
     #[cfg(not(target_arch = "x86_64"))]
-    let (kernel_format, cmdline_prefix) = (KRUN_KERNEL_FORMAT_RAW, "FreeBSD:");
+    let (kernel_format, cmdline_prefix, flags) = (KRUN_KERNEL_FORMAT_RAW, "FreeBSD:", "-mq");
 
-    let cmdline = format!("{cmdline_prefix}vfs.root.mountfrom=cd9660:/dev/vtbd0 boot_mute=YES init_path=/init-freebsd");
+    let cmdline = format!(
+        "{cmdline_prefix}vfs.root.mountfrom=cd9660:/dev/vtbd0 {flags} init_path=/init-freebsd"
+    );
     let cmdline_cstr = CString::new(cmdline).context("CString::new")?;
 
     krun_call!(krun_set_kernel(
