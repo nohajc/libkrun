@@ -73,7 +73,7 @@ mod host {
             let _ = gvproxy_child.wait();
 
             let output_str = normalize_serial_output(output.stdout);
-            assert!(output_str.contains("OK\n"));
+            assert_eq!(output_str, "OK\n");
         }
     }
 }

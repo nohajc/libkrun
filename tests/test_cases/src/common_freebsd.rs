@@ -312,11 +312,11 @@ unsafe fn do_setup_and_enter(
 
     // Build CStrings for krun API.
     let kernel_cstr =
-        CString::new(kernel_path.as_os_str().as_bytes()).context("kernel_path CString")?;
+        CString::new(kernel_path.as_os_str().as_bytes()).context("CString::new")?;
     let rootfs_cstr =
-        CString::new(rootfs_path.as_os_str().as_bytes()).context("rootfs iso CString")?;
+        CString::new(rootfs_path.as_os_str().as_bytes()).context("CString::new")?;
     let config_iso_cstr =
-        CString::new(config_iso.as_os_str().as_bytes()).context("config iso CString")?;
+        CString::new(config_iso.as_os_str().as_bytes()).context("CString::new")?;
 
     // FreeBSD requires a serial console; virtio console is not supported.
     krun_call!(krun_disable_implicit_console(ctx))?;
@@ -324,16 +324,19 @@ unsafe fn do_setup_and_enter(
 
     // Kernel cmdline: mount vtbd0 as root via cd9660 and hand off to init-freebsd.
     #[cfg(target_arch = "x86_64")]
-    let (kernel_format, cmdline) = (KRUN_KERNEL_FORMAT_ELF, c"vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd");
+    let (kernel_format, cmdline_prefix) = (KRUN_KERNEL_FORMAT_ELF, "");
     #[cfg(not(target_arch = "x86_64"))]
-    let (kernel_format, cmdline) = (KRUN_KERNEL_FORMAT_RAW, c"FreeBSD:vfs.root.mountfrom=cd9660:/dev/vtbd0 -mq init_path=/init-freebsd");
+    let (kernel_format, cmdline_prefix) = (KRUN_KERNEL_FORMAT_RAW, "FreeBSD:");
+
+    let cmdline = format!("{cmdline_prefix}vfs.root.mountfrom=cd9660:/dev/vtbd0 boot_mute=YES init_path=/init-freebsd");
+    let cmdline_cstr = CString::new(cmdline).context("CString::new")?;
 
     krun_call!(krun_set_kernel(
         ctx,
         kernel_cstr.as_ptr(),
         kernel_format,
         std::ptr::null(),
-        cmdline.as_ptr(),
+        cmdline_cstr.as_ptr(),
     ))?;
 
     // vtbd0: rootfs ISO (init-freebsd + guest-agent)
@@ -353,7 +356,7 @@ unsafe fn do_setup_and_enter(
     ))?;
 
     if let Some(vfkit_path) = vfkit_sock {
-        let vfkit_cstr = CString::new(vfkit_path.as_bytes()).context("vfkit socket CString")?;
+        let vfkit_cstr = CString::new(vfkit_path.as_bytes()).context("CString::new")?;
         let mac = random_mac_address();
         let mut mac_mut = mac;
         krun_call!(krun_add_net_unixgram(

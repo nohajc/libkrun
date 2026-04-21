@@ -1,7 +1,6 @@
 #[cfg(target_os = "freebsd")]
 pub fn configure_virtio_net_ip() {
     use nix::libc;
-    use std::ffi::CString;
     use std::mem;
 
     // ioctl constants derived from freebsd-sysroot/usr/include/sys/sockio.h
@@ -44,14 +43,8 @@ pub fn configure_virtio_net_ip() {
     }
 
     // Interface name
-    let iface_name = match CString::new("vtnet0") {
-        Ok(name) => name,
-        Err(_) => {
-            eprintln!("Failed to create interface name CString");
-            return;
-        }
-    };
-    let iface_bytes = iface_name.as_bytes();
+    let iface_name = c"vtnet0";
+    let iface_bytes = iface_name.to_bytes();
 
     // Build the ifaliasreq structure
     let mut ifare: ifaliasreq = unsafe { mem::zeroed() };
