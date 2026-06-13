@@ -20,7 +20,7 @@ AWS_NITRO_INIT_SRC = \
 
 AWS_NITRO_INIT_LD_FLAGS = -larchive -lnsm
 
-INIT_SRC = init/init.c
+INIT_SRC = src/init_blob/init/init.c
 
 ifeq ($(SEV),1)
     VARIANT = -sev
