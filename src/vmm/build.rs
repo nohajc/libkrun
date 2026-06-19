@@ -1,8 +1,10 @@
 fn main() {
-    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") {
+    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64")
+        && std::env::var_os("CARGO_FEATURE_EFI").is_some()
+    {
         let edk2_binary_path = std::env::var("KRUN_EDK2_BINARY_PATH").unwrap_or_else(|_| {
             format!(
-                "{}/../../edk2/KRUN_EFI.silent.fd",
+                "{}/edk2/KRUN_EFI.silent.fd",
                 std::env::var("CARGO_MANIFEST_DIR").unwrap()
             )
         });

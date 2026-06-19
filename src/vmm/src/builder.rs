@@ -99,7 +99,7 @@ use vm_memory::GuestMemory;
 use vm_memory::GuestRegionMmap;
 use vm_memory::{GuestAddress, GuestMemoryMmap};
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", feature = "efi"))]
 #[allow(dead_code)]
 static EDK2_BINARY: &[u8] = include_bytes!(env!("KRUN_EDK2_BINARY_PATH"));
 
